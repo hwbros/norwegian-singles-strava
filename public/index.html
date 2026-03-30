@@ -1,0 +1,1911 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Norwegian Singles Method - Strava</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      background: linear-gradient(135deg, #0c1222 0%, #1a2744 100%); 
+      min-height: 100vh; 
+      color: #e2e8f0; 
+    }
+    
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    
+    /* Header */
+    .header { 
+      display: flex; justify-content: space-between; align-items: center; 
+      padding: 24px 0; border-bottom: 1px solid rgba(100,116,139,0.3); margin-bottom: 32px; 
+      flex-wrap: wrap; gap: 16px;
+    }
+    .logo { display: flex; align-items: center; gap: 16px; }
+    .logo-icon { 
+      width: 56px; height: 56px; border-radius: 16px; 
+      background: linear-gradient(135deg, #f59e0b, #ef4444); 
+      display: flex; align-items: center; justify-content: center; font-size: 28px; 
+    }
+    .logo-text h1 { 
+      font-size: 26px; font-weight: 700; 
+      background: linear-gradient(90deg, #fbbf24, #f97316); 
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
+    }
+    .logo-text p { font-size: 12px; color: #64748b; letter-spacing: 2px; margin-top: 2px; }
+    
+    .user-info { display: flex; align-items: center; gap: 12px; }
+    .user-avatar { width: 40px; height: 40px; border-radius: 50%; background: rgba(245,158,11,0.2); display: flex; align-items: center; justify-content: center; }
+    .user-name { font-weight: 500; }
+    
+    .btn { 
+      display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; 
+      border-radius: 12px; border: none; font-weight: 600; cursor: pointer; 
+      transition: all 0.3s; font-size: 14px; text-decoration: none;
+    }
+    .btn-primary { background: linear-gradient(90deg, #f59e0b, #ef4444); color: #0f172a; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(245,158,11,0.3); }
+    .btn-strava { background: #FC4C02; color: white; }
+    .btn-strava:hover { background: #e34402; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(252,76,2,0.3); }
+    .btn-strava svg { vertical-align: middle; }
+    .btn-secondary { background: rgba(71,85,105,0.4); color: #cbd5e1; }
+    .btn-secondary:hover { background: rgba(71,85,105,0.6); }
+    .btn-success { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .btn-danger { background: rgba(239,68,68,0.2); color: #f87171; }
+    
+    /* Login Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); 
+      display: flex; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .modal {
+      background: #1e293b; border-radius: 20px; padding: 32px; 
+      width: 100%; max-width: 420px; border: 1px solid rgba(71,85,105,0.5);
+    }
+    .modal h2 { font-size: 24px; margin-bottom: 8px; text-align: center; }
+    .modal p { color: #94a3b8; text-align: center; margin-bottom: 24px; font-size: 14px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 8px; font-size: 14px; color: #94a3b8; }
+    .form-input {
+      width: 100%; padding: 14px 16px; border-radius: 10px;
+      background: rgba(15,23,42,0.8); border: 1px solid rgba(71,85,105,0.5);
+      color: #f1f5f9; font-size: 16px;
+    }
+    .form-input:focus { outline: none; border-color: #f59e0b; }
+    .form-input::placeholder { color: #64748b; }
+    .form-error { color: #f87171; font-size: 13px; margin-top: 8px; display: none; }
+    .form-note { 
+      background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #94a3b8;
+    }
+    
+    /* Tabs */
+    .tabs { 
+      display: flex; gap: 8px; margin-bottom: 32px; 
+      border-bottom: 1px solid rgba(100,116,139,0.2); padding-bottom: 16px; 
+      flex-wrap: wrap;
+    }
+    .tab { 
+      padding: 12px 24px; border-radius: 10px; border: none; 
+      background: transparent; color: #64748b; font-weight: 500; 
+      cursor: pointer; transition: all 0.3s; font-size: 14px;
+    }
+    .tab.active { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .tab:hover:not(.active) { color: #94a3b8; }
+    
+    /* Cards */
+    .card { 
+      background: rgba(30,41,59,0.6); border: 1px solid rgba(71,85,105,0.4); 
+      border-radius: 20px; padding: 24px; backdrop-filter: blur(10px); margin-bottom: 20px;
+    }
+    .card-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+    
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card { 
+      background: rgba(30,41,59,0.5); border: 1px solid rgba(71,85,105,0.3); 
+      border-radius: 16px; padding: 20px; transition: all 0.3s; 
+    }
+    .stat-card:hover { background: rgba(30,41,59,0.7); transform: translateY(-2px); }
+    .stat-icon { 
+      width: 44px; height: 44px; border-radius: 12px; 
+      display: flex; align-items: center; justify-content: center; margin-bottom: 16px; font-size: 20px; 
+    }
+    .stat-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+    .stat-label { font-size: 13px; color: #64748b; }
+    
+    /* Grid layouts */
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    @media (max-width: 768px) { 
+      .grid-2 { grid-template-columns: 1fr; }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    }
+    
+    /* Workout Card */
+    .workout-card { 
+      background: rgba(30,41,59,0.5); border: 1px solid rgba(71,85,105,0.4); 
+      border-radius: 16px; padding: 20px; margin-bottom: 16px; transition: all 0.3s; 
+    }
+    .workout-card:hover { background: rgba(30,41,59,0.7); }
+    .workout-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+    .workout-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .workout-date { font-size: 13px; color: #64748b; }
+    .workout-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    
+    .badge { 
+      padding: 4px 12px; border-radius: 20px; font-size: 12px; 
+      font-weight: 500; display: inline-flex; align-items: center; gap: 4px; 
+    }
+    .badge-sub-t { background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+    .badge-easy { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .badge-long { background: rgba(139,92,246,0.2); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+    .badge-treadmill { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+    .badge-warning { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .badge-success { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    
+    .workout-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 768px) { .workout-stats { grid-template-columns: repeat(3, 1fr); } }
+    .workout-stat { text-align: center; }
+    .workout-stat-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+    .workout-stat-value { font-size: 16px; font-weight: 600; }
+    
+    /* Edit controls */
+    .edit-btn { 
+      display: flex; align-items: center; gap: 6px; padding: 8px 16px; 
+      border-radius: 8px; background: rgba(71,85,105,0.4); border: none; 
+      color: #cbd5e1; font-size: 13px; cursor: pointer; transition: all 0.2s; 
+    }
+    .edit-btn:hover { background: rgba(71,85,105,0.6); }
+    .edit-input { 
+      width: 80px; padding: 8px 12px; border-radius: 8px; 
+      background: #334155; border: 1px solid #475569; 
+      color: #f1f5f9; text-align: center; font-size: 14px; 
+    }
+    .edit-input:focus { outline: none; border-color: #f59e0b; }
+    .save-btn { 
+      padding: 8px 12px; border-radius: 8px; 
+      background: rgba(34,197,94,0.2); border: none; color: #22c55e; cursor: pointer; font-size: 14px;
+    }
+    
+    /* Progress bars */
+    .progress-bar { 
+      height: 8px; background: rgba(71,85,105,0.3); border-radius: 4px; overflow: hidden; margin-top: 8px; 
+    }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+    
+    /* Feedback cards */
+    .feedback-card { 
+      padding: 16px; border-radius: 12px; 
+      display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; 
+    }
+    .feedback-good { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.2); }
+    .feedback-warning { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); }
+    .feedback-danger { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); }
+    .feedback-info { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); }
+    .feedback-icon { font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+    .feedback-title { font-weight: 600; margin-bottom: 4px; }
+    .feedback-text { font-size: 14px; color: #94a3b8; line-height: 1.6; }
+    
+    /* Welcome screen */
+    .welcome { text-align: center; padding: 80px 0; }
+    .welcome-icon { 
+      width: 100px; height: 100px; margin: 0 auto 32px; border-radius: 28px; 
+      background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); 
+      display: flex; align-items: center; justify-content: center; font-size: 48px; 
+    }
+    .welcome h2 { 
+      font-size: 36px; font-weight: 700; margin-bottom: 16px; 
+      background: linear-gradient(90deg, #fbbf24, #f97316, #fbbf24); 
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
+    }
+    .welcome p { color: #94a3b8; max-width: 500px; margin: 0 auto 40px; line-height: 1.7; }
+    .welcome-features { 
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; 
+      max-width: 700px; margin: 0 auto 48px; 
+    }
+    @media (max-width: 768px) { .welcome-features { grid-template-columns: 1fr; } }
+    .welcome-feature { 
+      padding: 24px; border-radius: 16px; 
+      background: rgba(30,41,59,0.5); border: 1px solid rgba(71,85,105,0.3); 
+    }
+    .welcome-feature-icon { font-size: 32px; margin-bottom: 12px; }
+    .welcome-feature h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+    .welcome-feature p { font-size: 13px; color: #64748b; margin: 0; }
+    
+    /* Score rings */
+    .score-ring { position: relative; width: 100px; height: 100px; margin: 0 auto 12px; }
+    .score-ring svg { transform: rotate(-90deg); }
+    .score-value { 
+      position: absolute; inset: 0; display: flex; align-items: center; 
+      justify-content: center; font-size: 22px; font-weight: 700; 
+    }
+    
+    /* Pace calculator */
+    .pace-calc { 
+      background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); 
+      border-radius: 16px; padding: 24px; margin-bottom: 24px; 
+    }
+    .pace-input-group { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .pace-input-group label { font-size: 14px; color: #94a3b8; width: 140px; }
+    .pace-input { 
+      padding: 12px 16px; border-radius: 10px; background: rgba(30,41,59,0.8); 
+      border: 1px solid rgba(71,85,105,0.5); color: #f1f5f9; font-size: 16px; width: 120px; text-align: center; 
+    }
+    .pace-input:focus { outline: none; border-color: #f59e0b; }
+    .pace-results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px; }
+    @media (max-width: 768px) { .pace-results { grid-template-columns: 1fr; } }
+    .pace-result { text-align: center; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; }
+    .pace-result-label { font-size: 12px; color: #64748b; margin-bottom: 6px; }
+    .pace-result-value { font-size: 20px; font-weight: 700; color: #fbbf24; }
+    
+    /* Loading */
+    .loading { text-align: center; padding: 60px 0; }
+    .spinner { 
+      width: 48px; height: 48px; border: 3px solid rgba(245,158,11,0.2); 
+      border-top-color: #f59e0b; border-radius: 50%; 
+      animation: spin 1s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    /* Weekly structure */
+    .week-structure { display: flex; justify-content: space-around; padding: 20px 0; flex-wrap: wrap; gap: 8px; }
+    .week-day { text-align: center; }
+    .week-day-icon { 
+      width: 44px; height: 44px; border-radius: 50%; 
+      display: flex; align-items: center; justify-content: center; 
+      margin: 0 auto 8px; font-size: 20px; 
+    }
+    .week-day-label { font-size: 12px; color: #94a3b8; }
+
+    .hidden { display: none !important; }
+    
+    /* Race distance tabs */
+    .race-tab {
+      padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(71,85,105,0.4);
+      background: rgba(30,41,59,0.5); color: #94a3b8; font-size: 13px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .race-tab:hover { background: rgba(71,85,105,0.4); }
+    .race-tab.active { 
+      background: rgba(245,158,11,0.2); color: #fbbf24; 
+      border-color: rgba(245,158,11,0.4); 
+    }
+    
+    @media (max-width: 768px) {
+      #predictedRaceTimes > div:nth-child(3) {
+        grid-template-columns: repeat(2, 1fr) !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">🇳🇴</div>
+        <div class="logo-text">
+          <h1>Norwegian Singles</h1>
+          <p>SUB-THRESHOLD TRAINING</p>
+        </div>
+      </div>
+      <div id="headerRight">
+        <a href="/api/strava/auth" class="btn btn-strava">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+          Strava 연결
+        </a>
+      </div>
+    </header>
+
+    <!-- Welcome Screen -->
+    <div id="welcomeScreen" class="welcome">
+      <div class="welcome-icon">🏃‍♂️</div>
+      <h2>Norwegian Singles Method</h2>
+      <p>
+        sirpoc이 개발한 Sub-threshold 훈련법입니다.<br/>
+        Strava와 연동하여 실제 훈련 데이터를 분석하고<br/>
+        Norwegian Singles 방법론에 맞게 피드백을 제공합니다.
+      </p>
+      <div class="welcome-features">
+        <div class="welcome-feature">
+          <div class="welcome-feature-icon">⚡</div>
+          <h3>Sub-Threshold</h3>
+          <p>LT2 바로 아래, RPE 5-6</p>
+        </div>
+        <div class="welcome-feature">
+          <div class="welcome-feature-icon">🎯</div>
+          <h3>20-25% Rule</h3>
+          <p>퀄리티 볼륨 비율</p>
+        </div>
+        <div class="welcome-feature">
+          <div class="welcome-feature-icon">😌</div>
+          <h3>Easy = Easy</h3>
+          <p>이지런은 정말 쉽게</p>
+        </div>
+      </div>
+      <a href="/api/strava/auth" class="btn btn-strava" style="padding: 18px 36px; font-size: 17px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+        Strava로 시작하기
+      </a>
+      <div style="margin-top: 16px; font-size: 13px; color: #64748b;">
+        Garmin → Strava 동기화를 먼저 설정하세요
+      </div>
+    </div>
+
+    <!-- Main App (hidden until logged in) -->
+    <div id="mainApp" class="hidden">
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')">대시보드</button>
+        <button class="tab" data-tab="recommend" onclick="switchTab('recommend')">훈련 추천</button>
+        <button class="tab" data-tab="workouts" onclick="switchTab('workouts')">운동 기록</button>
+        <button class="tab" data-tab="analysis" onclick="switchTab('analysis')">분석</button>
+        <button class="tab" data-tab="calculator" onclick="switchTab('calculator')">계산기</button>
+        <button class="tab" data-tab="guide" onclick="switchTab('guide')">가이드</button>
+      </div>
+
+      <!-- Dashboard Tab -->
+      <div id="dashboardTab">
+        <!-- 오늘의 훈련 추천 카드 -->
+        <div id="todayRecommendCard" class="card" style="background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(239,68,68,0.1)); border-color: rgba(245,158,11,0.3);">
+          <div class="card-title">🎯 오늘의 훈련</div>
+          <div id="todayRecommend">
+            <!-- 오늘 훈련 추천 내용 -->
+          </div>
+        </div>
+
+        <div id="statsGrid" class="stats-grid">
+          <!-- Stats will be loaded here -->
+        </div>
+
+        <div class="grid-2">
+          <!-- Quality Volume Check -->
+          <div class="card">
+            <div class="card-title">📊 퀄리티 볼륨 체크</div>
+            <div style="text-align: center; padding: 20px 0;">
+              <div id="qualityPercent" style="font-size: 48px; font-weight: 700; color: #22c55e; margin-bottom: 8px;">--%</div>
+              <div style="font-size: 14px; color: #64748b; margin-bottom: 16px;">목표: 20-25%</div>
+              <div class="progress-bar" style="max-width: 300px; margin: 0 auto; height: 12px;">
+                <div id="qualityBar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #22c55e, #16a34a);"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Weekly Structure -->
+          <div class="card">
+            <div class="card-title">📅 이번 주 훈련 구조</div>
+            <div id="weekStructure" class="week-structure">
+              <!-- Weekly structure will be loaded here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Compliance Scores -->
+        <div class="card">
+          <div class="card-title">🎯 Norwegian Singles 준수 점수</div>
+          <div id="complianceScores" class="grid-4" style="margin-top: 16px;">
+            <!-- Scores will be loaded here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Recommend Tab (훈련 추천) -->
+      <div id="recommendTab" class="hidden">
+        <h2 style="font-size: 22px; font-weight: 600; margin-bottom: 20px;">📋 훈련 추천</h2>
+        
+        <!-- 오늘의 훈련 -->
+        <div class="card" style="background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(30,41,59,0.6)); border-color: rgba(245,158,11,0.3);">
+          <div class="card-title" style="color: #fbbf24;">🔥 오늘의 훈련</div>
+          <div id="todayWorkoutDetail">
+            <!-- 상세 훈련 내용 -->
+          </div>
+        </div>
+
+        <!-- 이번 주 훈련 계획 -->
+        <div class="card">
+          <div class="card-title">📅 이번 주 훈련 계획</div>
+          <div id="weeklyPlan">
+            <!-- 주간 계획 -->
+          </div>
+        </div>
+
+        <!-- 다음 주 미리보기 -->
+        <div class="card">
+          <div class="card-title">🔮 다음 주 예정</div>
+          <div id="nextWeekPreview">
+            <!-- 다음 주 미리보기 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Workouts Tab -->
+      <div id="workoutsTab" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+          <h2 style="font-size: 22px; font-weight: 600;">📋 운동 기록</h2>
+          <button class="btn btn-secondary" onclick="loadActivities()">🔄 새로고침</button>
+        </div>
+        <div id="workoutsList">
+          <div class="loading">
+            <div class="spinner"></div>
+            <p>운동 기록을 불러오는 중...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analysis Tab -->
+      <div id="analysisTab" class="hidden">
+        <h2 style="font-size: 22px; font-weight: 600; margin-bottom: 20px;">📊 분석 & 피드백</h2>
+        <div id="analysisContent">
+          <!-- Analysis will be loaded here -->
+        </div>
+      </div>
+
+      <!-- Calculator Tab -->
+      <div id="calculatorTab" class="hidden">
+        <h2 style="font-size: 22px; font-weight: 600; margin-bottom: 20px;">🧮 Sub-T 페이스 계산기</h2>
+
+        <!-- 훈련 데이터 기반 예상 레이스 시간 -->
+        <div id="predictedRaceTimes" class="card" style="display: none;">
+          <div class="card-title">🏆 훈련 데이터 기반 예상 레이스 시간</div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+            최근 Sub-T 세션 데이터를 분석하여 예상 레이스 시간을 계산했습니다
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+            <div style="text-align: center; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">5K</div>
+              <div style="font-size: 22px; font-weight: 700; color: #fbbf24;" id="predicted5k">--:--</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">10K</div>
+              <div style="font-size: 22px; font-weight: 700; color: #fbbf24;" id="predicted10k">--:--</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">하프</div>
+              <div style="font-size: 22px; font-weight: 700; color: #fbbf24;" id="predictedHM">--:--</div>
+            </div>
+            <div style="text-align: center; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">풀코스</div>
+              <div style="font-size: 22px; font-weight: 700; color: #fbbf24;" id="predictedFM">--:--</div>
+            </div>
+          </div>
+          <div style="margin-top: 12px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 8px; font-size: 12px; color: #94a3b8;">
+            💡 <span id="predictionBasis">Sub-T 평균 페이스 기반 예측</span>
+          </div>
+        </div>
+
+        <div class="pace-calc">
+          <div style="margin-bottom: 24px;">
+            <div style="font-size: 14px; color: #94a3b8; margin-bottom: 16px;">
+              레이스 거리를 선택하고 시간을 입력하세요
+            </div>
+            
+            <!-- 거리 선택 탭 -->
+            <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+              <button class="race-tab active" data-distance="hm" onclick="selectRaceDistance('hm')">하프마라톤</button>
+              <button class="race-tab" data-distance="fm" onclick="selectRaceDistance('fm')">풀코스</button>
+              <button class="race-tab" data-distance="10k" onclick="selectRaceDistance('10k')">10K</button>
+              <button class="race-tab" data-distance="5k" onclick="selectRaceDistance('5k')">5K</button>
+            </div>
+            
+            <!-- 각 거리별 입력 필드 -->
+            <div id="raceInputs">
+              <div id="input-hm" class="race-input-section">
+                <div class="pace-input-group">
+                  <label>하프마라톤 (21.0975km)</label>
+                  <input type="text" class="pace-input" id="hmInput" value="1:45:00" oninput="calculateFromDistance('hm')" placeholder="1:45:00"/>
+                </div>
+              </div>
+              <div id="input-fm" class="race-input-section" style="display: none;">
+                <div class="pace-input-group">
+                  <label>풀코스 마라톤 (42.195km)</label>
+                  <input type="text" class="pace-input" id="fmInput" value="3:45:00" oninput="calculateFromDistance('fm')" placeholder="3:45:00"/>
+                </div>
+              </div>
+              <div id="input-10k" class="race-input-section" style="display: none;">
+                <div class="pace-input-group">
+                  <label>10K</label>
+                  <input type="text" class="pace-input" id="tenKInput" value="48:00" oninput="calculateFromDistance('10k')" placeholder="48:00"/>
+                </div>
+              </div>
+              <div id="input-5k" class="race-input-section" style="display: none;">
+                <div class="pace-input-group">
+                  <label>5K</label>
+                  <input type="text" class="pace-input" id="fiveKInput" value="23:00" oninput="calculateFromDistance('5k')" placeholder="23:00"/>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 환산된 다른 거리 시간 -->
+            <div style="margin-top: 16px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="font-size: 13px; font-weight: 600; margin-bottom: 12px; color: #94a3b8;">📐 환산 레이스 시간</div>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 13px;">
+                <div style="text-align: center;">
+                  <div style="color: #64748b;">5K</div>
+                  <div style="font-weight: 600;" id="conv5k">22:30</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="color: #64748b;">10K</div>
+                  <div style="font-weight: 600;" id="conv10k">47:15</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="color: #64748b;">하프</div>
+                  <div style="font-weight: 600;" id="convHM">1:45:00</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="color: #64748b;">풀코스</div>
+                  <div style="font-weight: 600;" id="convFM">3:39:27</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid rgba(245,158,11,0.2); padding-top: 20px;">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #fbbf24;">
+              📊 추천 Sub-T 페이스
+            </div>
+            <div class="pace-results">
+              <div class="pace-result">
+                <div class="pace-result-label">짧은 인터벌 (1km)</div>
+                <div class="pace-result-value" id="shortPace">4:50</div>
+                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">6×1000m / 60초 휴식</div>
+              </div>
+              <div class="pace-result">
+                <div class="pace-result-label">중간 인터벌 (2km)</div>
+                <div class="pace-result-value" id="mediumPace">5:00</div>
+                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">4×2000m / 75초 휴식</div>
+              </div>
+              <div class="pace-result">
+                <div class="pace-result-label">긴 인터벌 (10분)</div>
+                <div class="pace-result-value" id="longPace">5:09</div>
+                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">3×10분 / 90초 휴식</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 20px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+            <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">💡 이지런 페이스</div>
+            <div style="font-size: 24px; font-weight: 700; color: #22c55e;" id="easyPace">6:45/km 또는 더 느리게</div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">HR &lt; 70% MaxHR, 대화 가능한 속도</div>
+          </div>
+        </div>
+
+        <!-- 페이스 차트 -->
+        <div class="card">
+          <div class="card-title">📈 페이스 존 비교</div>
+          <div style="display: flex; align-items: flex-end; gap: 8px; height: 120px; padding: 16px 0;">
+            <div style="flex: 1; text-align: center;">
+              <div id="bar5k" style="background: linear-gradient(to top, #ef4444, #f87171); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 100px;"></div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px;">5K</div>
+              <div style="font-size: 12px; font-weight: 600;" id="pace5k">4:30</div>
+            </div>
+            <div style="flex: 1; text-align: center;">
+              <div id="bar10k" style="background: linear-gradient(to top, #f59e0b, #fbbf24); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 90px;"></div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px;">10K</div>
+              <div style="font-size: 12px; font-weight: 600;" id="pace10k">4:43</div>
+            </div>
+            <div style="flex: 1; text-align: center;">
+              <div id="barSubT" style="background: linear-gradient(to top, #f59e0b, #fbbf24); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 80px; border: 2px solid #fbbf24;"></div>
+              <div style="font-size: 11px; color: #fbbf24; margin-top: 8px; font-weight: 600;">Sub-T</div>
+              <div style="font-size: 12px; font-weight: 600; color: #fbbf24;" id="paceSubT">5:00</div>
+            </div>
+            <div style="flex: 1; text-align: center;">
+              <div id="barHM" style="background: linear-gradient(to top, #22c55e, #4ade80); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 75px;"></div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px;">HM</div>
+              <div style="font-size: 12px; font-weight: 600;" id="paceHM">5:00</div>
+            </div>
+            <div style="flex: 1; text-align: center;">
+              <div id="barFM" style="background: linear-gradient(to top, #3b82f6, #60a5fa); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 65px;"></div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px;">FM</div>
+              <div style="font-size: 12px; font-weight: 600;" id="paceFM">5:12</div>
+            </div>
+            <div style="flex: 1; text-align: center;">
+              <div id="barEasy" style="background: linear-gradient(to top, #22c55e, #86efac); border-radius: 4px 4px 0 0; margin: 0 auto; width: 40px; height: 50px;"></div>
+              <div style="font-size: 11px; color: #22c55e; margin-top: 8px;">Easy</div>
+              <div style="font-size: 12px; font-weight: 600; color: #22c55e;" id="paceEasyBar">6:45</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Guide Tab (Norwegian Singles Method 설명) -->
+      <div id="guideTab" class="hidden">
+        <h2 style="font-size: 22px; font-weight: 600; margin-bottom: 20px;">📚 Norwegian Singles Method 가이드</h2>
+
+        <!-- 개요 -->
+        <div class="card">
+          <div class="card-title">🇳🇴 Norwegian Singles Method란?</div>
+          <div style="line-height: 1.8; color: #cbd5e1;">
+            <p style="margin-bottom: 16px;">
+              <strong style="color: #fbbf24;">Norwegian Singles Method</strong>는 LetsRun 포럼의 
+              <strong style="color: #60a5fa;">sirpoc (James Copeland)</strong>이 개발한 Sub-threshold 기반 훈련법입니다.
+            </p>
+            <p style="margin-bottom: 16px;">
+              노르웨이 엘리트 선수들의 "double threshold" 훈련에서 영감을 받았지만, 
+              <strong style="color: #22c55e;">lactate meter 없이도</strong> 일반 러너가 적용할 수 있도록 단순화되었습니다.
+            </p>
+            <div style="padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border-left: 4px solid #f59e0b;">
+              <strong style="color: #fbbf24;">핵심 철학:</strong> 
+              "Sub-T는 상태(state)이지 페이스(pace)가 아니다. Wrecked가 아닌 Worked 느낌으로 끝내라."
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-T 세션 설명 -->
+        <div class="card">
+          <div class="card-title" style="color: #fbbf24;">🔥 Sub-Threshold (Sub-T) 세션</div>
+          
+          <div style="display: grid; gap: 16px; margin-bottom: 20px;">
+            <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="font-weight: 600; margin-bottom: 8px;">📍 목표 강도</div>
+              <ul style="color: #94a3b8; padding-left: 20px; line-height: 1.8;">
+                <li><strong style="color: #fbbf24;">RPE 5-6/10</strong> - "Comfortably Hard"</li>
+                <li><strong style="color: #fbbf24;">HR 82-88% MaxHR</strong></li>
+                <li><strong style="color: #fbbf24;">Lactate 2-4 mmol/L</strong> (LT2 바로 아래)</li>
+                <li>하프마라톤 레이스 페이스 근처</li>
+              </ul>
+            </div>
+          </div>
+
+          <div style="font-weight: 600; margin-bottom: 12px;">📋 인터벌 종류</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+            <div style="padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">짧은 인터벌</div>
+              <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">6 × 1000m</div>
+              <div style="font-size: 13px; color: #94a3b8;">휴식: 60초 조깅</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 8px;">HM 페이스보다 3% 빠르게</div>
+            </div>
+            <div style="padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">중간 인터벌</div>
+              <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">4 × 2000m</div>
+              <div style="font-size: 13px; color: #94a3b8;">휴식: 75초 조깅</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 8px;">HM 페이스</div>
+            </div>
+            <div style="padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">긴 인터벌</div>
+              <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">3 × 10분</div>
+              <div style="font-size: 13px; color: #94a3b8;">휴식: 90초 조깅</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 8px;">HM 페이스보다 3% 느리게</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Easy Run 설명 -->
+        <div class="card">
+          <div class="card-title" style="color: #22c55e;">🚶 Easy Run (이지런)</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+              <div style="font-weight: 600; margin-bottom: 12px;">✅ 올바른 이지런</div>
+              <ul style="color: #94a3b8; padding-left: 20px; line-height: 1.8;">
+                <li><strong style="color: #22c55e;">HR &lt; 70% MaxHR</strong></li>
+                <li>대화가 편하게 가능한 속도</li>
+                <li>RPE 2-3/10</li>
+                <li>"너무 느린 것 같은데?" = 정확히 맞음!</li>
+              </ul>
+            </div>
+            <div>
+              <div style="font-weight: 600; margin-bottom: 12px;">❌ 흔한 실수</div>
+              <ul style="color: #94a3b8; padding-left: 20px; line-height: 1.8;">
+                <li style="color: #f87171;">이지런에서 페이스에 집착</li>
+                <li style="color: #f87171;">"조금만 더 빨리"의 유혹</li>
+                <li style="color: #f87171;">HR 75-80%로 뛰기</li>
+                <li style="color: #f87171;">매일 피로 누적</li>
+              </ul>
+            </div>
+          </div>
+          <div style="margin-top: 16px; padding: 16px; background: rgba(34,197,94,0.1); border-radius: 12px; border-left: 4px solid #22c55e;">
+            <strong style="color: #22c55e;">💡 핵심:</strong> 
+            Easy가 진짜 Easy해야 Sub-T 세션에서 품질 높은 훈련이 가능합니다.
+          </div>
+        </div>
+
+        <!-- 주간 구조 -->
+        <div class="card">
+          <div class="card-title">📅 권장 주간 구조</div>
+          <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px;">
+            <div style="text-align: center; padding: 12px 8px; background: rgba(34,197,94,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">월</div>
+              <div style="font-size: 20px; margin: 4px 0;">🚶</div>
+              <div style="font-size: 11px; color: #22c55e;">Easy</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(245,158,11,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">화</div>
+              <div style="font-size: 20px; margin: 4px 0;">🔥</div>
+              <div style="font-size: 11px; color: #fbbf24;">Sub-T</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(34,197,94,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">수</div>
+              <div style="font-size: 20px; margin: 4px 0;">🚶</div>
+              <div style="font-size: 11px; color: #22c55e;">Easy</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(245,158,11,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">목</div>
+              <div style="font-size: 20px; margin: 4px 0;">🔥</div>
+              <div style="font-size: 11px; color: #fbbf24;">Sub-T</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(34,197,94,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">금</div>
+              <div style="font-size: 20px; margin: 4px 0;">🚶</div>
+              <div style="font-size: 11px; color: #22c55e;">Easy</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(245,158,11,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">토</div>
+              <div style="font-size: 20px; margin: 4px 0;">🔥</div>
+              <div style="font-size: 11px; color: #fbbf24;">Sub-T</div>
+            </div>
+            <div style="text-align: center; padding: 12px 8px; background: rgba(139,92,246,0.15); border-radius: 10px;">
+              <div style="font-size: 12px; color: #64748b;">일</div>
+              <div style="font-size: 20px; margin: 4px 0;">🏃</div>
+              <div style="font-size: 11px; color: #a78bfa;">Long</div>
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+            <div style="padding: 12px; background: rgba(245,158,11,0.1); border-radius: 8px; text-align: center;">
+              <div style="font-size: 24px; font-weight: 700; color: #fbbf24;">2-3회</div>
+              <div style="font-size: 12px; color: #94a3b8;">Sub-T 세션</div>
+            </div>
+            <div style="padding: 12px; background: rgba(34,197,94,0.1); border-radius: 8px; text-align: center;">
+              <div style="font-size: 24px; font-weight: 700; color: #22c55e;">3-4회</div>
+              <div style="font-size: 12px; color: #94a3b8;">Easy Run</div>
+            </div>
+            <div style="padding: 12px; background: rgba(139,92,246,0.1); border-radius: 8px; text-align: center;">
+              <div style="font-size: 24px; font-weight: 700; color: #a78bfa;">1회</div>
+              <div style="font-size: 12px; color: #94a3b8;">Long Run</div>
+            </div>
+            <div style="padding: 12px; background: rgba(59,130,246,0.1); border-radius: 8px; text-align: center;">
+              <div style="font-size: 24px; font-weight: 700; color: #60a5fa;">20-25%</div>
+              <div style="font-size: 12px; color: #94a3b8;">퀄리티 볼륨</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 핵심 원칙 -->
+        <div class="card">
+          <div class="card-title">⚡ 핵심 원칙 5가지</div>
+          <div style="display: grid; gap: 12px;">
+            <div style="display: flex; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="width: 40px; height: 40px; background: rgba(245,158,11,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">1</div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">Sub-T는 "State"이다</div>
+                <div style="font-size: 14px; color: #94a3b8;">날씨, 피로, 지형에 따라 페이스를 조절하세요. 목표는 특정 페이스가 아닌 특정 느낌입니다.</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="width: 40px; height: 40px; background: rgba(34,197,94,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">2</div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">Easy는 진짜 Easy</div>
+                <div style="font-size: 14px; color: #94a3b8;">HR 70% 미만을 엄격히 지키세요. Sub-T의 품질은 Easy의 품질에 달려있습니다.</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="width: 40px; height: 40px; background: rgba(139,92,246,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">3</div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">일관성이 핵심</div>
+                <div style="font-size: 14px; color: #94a3b8;">같은 워크아웃을 매주 반복하며 점진적으로 발전하세요. 변화보다 반복이 중요합니다.</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="width: 40px; height: 40px; background: rgba(59,130,246,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">4</div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">"Worked" not "Wrecked"</div>
+                <div style="font-size: 14px; color: #94a3b8;">세션 후 지쳤다면 너무 열심히 한 것입니다. 다음 날 또 할 수 있어야 합니다.</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="width: 40px; height: 40px; background: rgba(239,68,68,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">5</div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">20-25% 퀄리티 볼륨</div>
+                <div style="font-size: 14px; color: #94a3b8;">주간 총 훈련 시간의 20-25%만 Sub-T 강도로. 나머지는 Easy와 Long Run입니다.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 자주 묻는 질문 -->
+        <div class="card">
+          <div class="card-title">❓ 자주 묻는 질문</div>
+          <div style="display: grid; gap: 16px;">
+            <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">Q: Lactate meter가 필요한가요?</div>
+              <div style="color: #94a3b8; line-height: 1.7;">
+                아니요! Norwegian Singles는 lactate meter 없이 RPE와 HR로 충분히 적용 가능하도록 설계되었습니다.
+                RPE 5-6, HR 82-88% MaxHR을 가이드라인으로 사용하세요.
+              </div>
+            </div>
+            <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">Q: 일반 "Norwegian Method"와 다른가요?</div>
+              <div style="color: #94a3b8; line-height: 1.7;">
+                네! 일반 Norwegian Method는 4×4분 VO2max 인터벌(HR 90-95%)입니다.
+                Norwegian Singles는 Sub-threshold 강도(HR 82-88%)로 더 많은 볼륨을 소화합니다.
+              </div>
+            </div>
+            <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+              <div style="font-weight: 600; color: #fbbf24; margin-bottom: 8px;">Q: 레이스 페이스 훈련은 언제 하나요?</div>
+              <div style="color: #94a3b8; line-height: 1.7;">
+                레이스 4-6주 전부터 일부 Sub-T 세션을 목표 레이스 페이스로 대체할 수 있습니다.
+                기본 블록에서는 Sub-T 강도 유지를 권장합니다.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 참고 자료 -->
+        <div class="card">
+          <div class="card-title">🔗 참고 자료</div>
+          <div style="display: grid; gap: 12px;">
+            <a href="https://norwegiansingles.run/" target="_blank" style="display: flex; align-items: center; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-decoration: none; color: inherit; transition: background 0.2s;">
+              <span style="font-size: 24px;">🌐</span>
+              <div>
+                <div style="font-weight: 600; color: #60a5fa;">norwegiansingles.run</div>
+                <div style="font-size: 13px; color: #94a3b8;">공식 가이드 사이트</div>
+              </div>
+            </a>
+            <a href="https://lactrace.com/norwegian-singles" target="_blank" style="display: flex; align-items: center; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-decoration: none; color: inherit; transition: background 0.2s;">
+              <span style="font-size: 24px;">🧮</span>
+              <div>
+                <div style="font-weight: 600; color: #60a5fa;">LacTrace 페이스 계산기</div>
+                <div style="font-size: 13px; color: #94a3b8;">상세 페이스 존 계산</div>
+              </div>
+            </a>
+            <a href="https://www.reddit.com/r/NorwegianSinglesRun/" target="_blank" style="display: flex; align-items: center; gap: 12px; padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-decoration: none; color: inherit; transition: background 0.2s;">
+              <span style="font-size: 24px;">💬</span>
+              <div>
+                <div style="font-weight: 600; color: #60a5fa;">r/NorwegianSinglesRun</div>
+                <div style="font-size: 13px; color: #94a3b8;">Reddit 커뮤니티</div>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // API Base URL
+    const API_BASE = window.location.origin;
+    
+    // State
+    let workouts = [];
+    let userInfo = null;
+    let editingWorkout = null;
+
+    // ===== Authentication (Strava OAuth) =====
+    
+    async function checkLoginStatus() {
+      // URL 파라미터 체크 (OAuth 콜백)
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('error')) {
+        alert('Strava 연결이 취소되었습니다.');
+        window.history.replaceState({}, document.title, '/');
+      }
+      if (urlParams.get('connected')) {
+        window.history.replaceState({}, document.title, '/');
+      }
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/status`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.loggedIn) {
+          userInfo = data.athlete;
+          showMainApp();
+          loadActivities();
+        }
+      } catch (error) {
+        console.log('로그인 상태 확인 실패');
+      }
+    }
+    
+    async function logout() {
+      try {
+        await fetch(`${API_BASE}/api/strava/logout`, {
+          method: 'POST',
+          credentials: 'include'
+        });
+      } catch (error) {
+        console.error('로그아웃 에러:', error);
+      }
+      
+      userInfo = null;
+      workouts = [];
+      document.getElementById('mainApp').classList.add('hidden');
+      document.getElementById('welcomeScreen').classList.remove('hidden');
+      document.getElementById('headerRight').innerHTML = `
+        <a href="/api/strava/auth" class="btn btn-strava">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+          Strava 연결
+        </a>
+      `;
+    }
+    
+    function showMainApp() {
+      document.getElementById('welcomeScreen').classList.add('hidden');
+      document.getElementById('mainApp').classList.remove('hidden');
+      
+      // Update header with Strava user info
+      const name = userInfo?.firstname ? `${userInfo.firstname} ${userInfo.lastname || ''}` : 'Athlete';
+      const avatar = userInfo?.profile_medium || '';
+      
+      document.getElementById('headerRight').innerHTML = `
+        <div class="user-info">
+          ${avatar ? `<img src="${avatar}" style="width: 40px; height: 40px; border-radius: 50%;">` : '<div class="user-avatar">👤</div>'}
+          <span class="user-name">${name}</span>
+          <button class="btn btn-danger" onclick="logout()" style="padding: 8px 16px;">연결 해제</button>
+        </div>
+      `;
+    }
+
+    // ===== Data Loading =====
+    
+    async function loadActivities() {
+      const workoutsList = document.getElementById('workoutsList');
+      workoutsList.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Strava에서 운동 기록을 불러오는 중...</p>
+        </div>
+      `;
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/activities?limit=30`, {
+          credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          workouts = data.activities;
+          renderWorkouts();
+          updateDashboard();
+          updateAnalysis();
+          updatePredictedRaceTimes();
+          updateTrainingRecommendations();
+          updateTodayRecommendCard();
+        } else {
+          workoutsList.innerHTML = `
+            <div class="feedback-card feedback-danger">
+              <span class="feedback-icon">⚠️</span>
+              <div>
+                <div class="feedback-title">데이터를 불러올 수 없습니다</div>
+                <div class="feedback-text">${data.error || '다시 시도해주세요.'}</div>
+              </div>
+            </div>
+          `;
+        }
+      } catch (error) {
+        workoutsList.innerHTML = `
+          <div class="feedback-card feedback-danger">
+            <span class="feedback-icon">⚠️</span>
+            <div>
+              <div class="feedback-title">서버 연결 실패</div>
+              <div class="feedback-text">서버가 실행 중인지 확인하세요.</div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // ===== Rendering =====
+    
+    function renderWorkouts() {
+      const container = document.getElementById('workoutsList');
+      
+      if (workouts.length === 0) {
+        container.innerHTML = `
+          <div class="feedback-card feedback-info">
+            <span class="feedback-icon">📭</span>
+            <div>
+              <div class="feedback-title">운동 기록이 없습니다</div>
+              <div class="feedback-text">최근 2주간 러닝 기록이 없습니다.</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      
+      let html = '';
+      workouts.forEach(w => {
+        html += `
+          <div class="workout-card">
+            <div class="workout-header">
+              <div>
+                <div class="workout-title">
+                  ${w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : '🚶'} ${w.name}
+                </div>
+                <div class="workout-date">${w.date}</div>
+                <div class="workout-badges">
+                  <span class="badge ${w.type === 'sub-t' ? 'badge-sub-t' : w.type === 'long' ? 'badge-long' : 'badge-easy'}">
+                    ${w.type === 'sub-t' ? 'Sub-T' : w.type === 'long' ? 'Long Run' : 'Easy'}
+                  </span>
+                  ${w.subType ? `<span class="badge badge-sub-t">${w.subType === 'short' ? '짧은 인터벌' : w.subType === 'medium' ? '중간 인터벌' : '긴 인터벌'}</span>` : ''}
+                  ${w.isTreadmill ? '<span class="badge badge-treadmill">🏃‍♂️ Treadmill</span>' : ''}
+                  ${w.needsPaceCorrection ? '<span class="badge badge-warning">⚠️ 페이스 수정 필요</span>' : ''}
+                </div>
+              </div>
+              ${w.isTreadmill ? `
+                <div>
+                  ${editingWorkout === w.id ? `
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <input type="text" class="edit-input" id="paceInput-${w.id}" value="${w.avgPace}" />
+                      <button class="save-btn" onclick="savePace(${w.id})">✓</button>
+                    </div>
+                  ` : `
+                    <button class="edit-btn" onclick="editPace(${w.id})">✏️ 페이스 수정</button>
+                  `}
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="workout-stats">
+              <div class="workout-stat">
+                <div class="workout-stat-label">거리</div>
+                <div class="workout-stat-value">${w.distance}km</div>
+              </div>
+              <div class="workout-stat">
+                <div class="workout-stat-label">시간</div>
+                <div class="workout-stat-value">${w.duration}분</div>
+              </div>
+              <div class="workout-stat">
+                <div class="workout-stat-label">평균 페이스</div>
+                <div class="workout-stat-value">${w.avgPace}/km</div>
+              </div>
+              <div class="workout-stat">
+                <div class="workout-stat-label">평균 HR</div>
+                <div class="workout-stat-value">${w.avgHR || '-'}bpm</div>
+              </div>
+              <div class="workout-stat">
+                <div class="workout-stat-label">최대 HR</div>
+                <div class="workout-stat-value">${w.maxHR || '-'}bpm</div>
+              </div>
+              <div class="workout-stat">
+                <div class="workout-stat-label">칼로리</div>
+                <div class="workout-stat-value">${w.calories || '-'}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      container.innerHTML = html;
+    }
+    
+    function updateDashboard() {
+      // Count workout types
+      const subTCount = workouts.filter(w => w.type === 'sub-t').length;
+      const easyCount = workouts.filter(w => w.type === 'easy').length;
+      const longCount = workouts.filter(w => w.type === 'long').length;
+      
+      // Calculate quality volume
+      const totalTime = workouts.reduce((sum, w) => sum + w.duration, 0);
+      const qualityTime = workouts.filter(w => w.type === 'sub-t')
+        .reduce((sum, w) => sum + (w.duration * 0.6), 0);
+      const qualityPercent = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+      
+      // Update stats grid
+      document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-card">
+          <div class="stat-icon" style="background: rgba(245,158,11,0.2);">🔥</div>
+          <div class="stat-value" style="color: #fbbf24;">${subTCount}</div>
+          <div class="stat-label">Sub-T 세션</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background: rgba(34,197,94,0.2);">🚶</div>
+          <div class="stat-value" style="color: #22c55e;">${easyCount}</div>
+          <div class="stat-label">이지런</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background: rgba(139,92,246,0.2);">🏃</div>
+          <div class="stat-value" style="color: #a78bfa;">${longCount}</div>
+          <div class="stat-label">롱런</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background: rgba(59,130,246,0.2);">📊</div>
+          <div class="stat-value" style="color: #60a5fa;">${qualityPercent}%</div>
+          <div class="stat-label">퀄리티 비율</div>
+        </div>
+      `;
+      
+      // Update quality percent display
+      const isGood = qualityPercent >= 18 && qualityPercent <= 27;
+      document.getElementById('qualityPercent').textContent = qualityPercent + '%';
+      document.getElementById('qualityPercent').style.color = isGood ? '#22c55e' : '#f59e0b';
+      document.getElementById('qualityBar').style.width = Math.min(100, (qualityPercent / 30) * 100) + '%';
+      document.getElementById('qualityBar').style.background = isGood 
+        ? 'linear-gradient(90deg, #22c55e, #16a34a)' 
+        : 'linear-gradient(90deg, #f59e0b, #d97706)';
+      
+      // Update compliance scores
+      const structureScore = Math.min(100, (subTCount >= 2 ? 40 : subTCount * 20) + (longCount >= 1 ? 30 : 0) + (easyCount >= 2 ? 30 : easyCount * 15));
+      const maxHR = 190;
+      const easyTooHard = workouts.filter(w => w.type === 'easy' && w.avgHR && w.avgHR > maxHR * 0.70).length;
+      const easyScore = Math.min(100, 100 - (easyTooHard * 25));
+      
+      document.getElementById('complianceScores').innerHTML = `
+        <div style="text-align: center; padding: 16px;">
+          <div class="score-ring">
+            <svg width="100" height="100" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(71,85,105,0.3)" stroke-width="8"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#fbbf24" stroke-width="8" stroke-dasharray="${structureScore * 2.64} 264" stroke-linecap="round"/>
+            </svg>
+            <div class="score-value">${structureScore}</div>
+          </div>
+          <div style="font-weight: 600; margin-bottom: 4px;">주간 구조</div>
+          <div style="font-size: 12px; color: #64748b;">Sub-T 2-3회 + Long 1회</div>
+        </div>
+        <div style="text-align: center; padding: 16px;">
+          <div class="score-ring">
+            <svg width="100" height="100" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(71,85,105,0.3)" stroke-width="8"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#22c55e" stroke-width="8" stroke-dasharray="${(isGood ? 90 : 70) * 2.64} 264" stroke-linecap="round"/>
+            </svg>
+            <div class="score-value">${isGood ? 90 : 70}</div>
+          </div>
+          <div style="font-weight: 600; margin-bottom: 4px;">퀄리티 볼륨</div>
+          <div style="font-size: 12px; color: #64748b;">목표 20-25%</div>
+        </div>
+        <div style="text-align: center; padding: 16px;">
+          <div class="score-ring">
+            <svg width="100" height="100" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(71,85,105,0.3)" stroke-width="8"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#60a5fa" stroke-width="8" stroke-dasharray="${easyScore * 2.64} 264" stroke-linecap="round"/>
+            </svg>
+            <div class="score-value">${easyScore}</div>
+          </div>
+          <div style="font-weight: 600; margin-bottom: 4px;">이지런 강도</div>
+          <div style="font-size: 12px; color: #64748b;">HR &lt; 70% Max</div>
+        </div>
+        <div style="text-align: center; padding: 16px;">
+          <div class="score-ring">
+            <svg width="100" height="100" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(71,85,105,0.3)" stroke-width="8"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#a78bfa" stroke-width="8" stroke-dasharray="${Math.min(100, workouts.length * 15) * 2.64} 264" stroke-linecap="round"/>
+            </svg>
+            <div class="score-value">${Math.min(100, workouts.length * 15)}</div>
+          </div>
+          <div style="font-weight: 600; margin-bottom: 4px;">일관성</div>
+          <div style="font-size: 12px; color: #64748b;">주간 훈련 빈도</div>
+        </div>
+      `;
+    }
+    
+    function updateAnalysis() {
+      const subTCount = workouts.filter(w => w.type === 'sub-t').length;
+      const easyCount = workouts.filter(w => w.type === 'easy').length;
+      const maxHR = 190;
+      const easyTooHard = workouts.filter(w => w.type === 'easy' && w.avgHR && w.avgHR > maxHR * 0.70);
+      
+      const totalTime = workouts.reduce((sum, w) => sum + w.duration, 0);
+      const qualityTime = workouts.filter(w => w.type === 'sub-t')
+        .reduce((sum, w) => sum + (w.duration * 0.6), 0);
+      const qualityPercent = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+      const isGoodQuality = qualityPercent >= 18 && qualityPercent <= 27;
+
+      document.getElementById('analysisContent').innerHTML = `
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title" style="color: #fbbf24;">🔥 Sub-T 강도 체크</div>
+            <div style="margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #94a3b8;">목표 RPE</span>
+                <span style="font-weight: 600;">5-6 / 10</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #94a3b8;">목표 HR</span>
+                <span style="font-weight: 600;">82-88% MaxHR</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #94a3b8;">느낌</span>
+                <span style="font-weight: 600; color: #fbbf24;">"Comfortably Hard"</span>
+              </div>
+            </div>
+            <div class="feedback-card ${subTCount >= 2 ? 'feedback-good' : 'feedback-warning'}">
+              <span class="feedback-icon">${subTCount >= 2 ? '✅' : '⚠️'}</span>
+              <div>
+                <div class="feedback-title" style="color: ${subTCount >= 2 ? '#22c55e' : '#fbbf24'};">
+                  ${subTCount >= 2 ? '적절한 Sub-T 빈도입니다!' : 'Sub-T 세션을 늘려보세요'}
+                </div>
+                <div class="feedback-text">
+                  ${subTCount >= 2 
+                    ? 'Sub-threshold 세션을 적절히 수행하고 있습니다.' 
+                    : '주 2-3회의 Sub-T 세션을 목표로 하세요.'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" style="color: #22c55e;">🚶 이지런 체크</div>
+            <div style="margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #94a3b8;">목표 HR</span>
+                <span style="font-weight: 600;">&lt; 70% MaxHR (~133bpm)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #94a3b8;">느낌</span>
+                <span style="font-weight: 600; color: #22c55e;">"대화 가능"</span>
+              </div>
+            </div>
+            <div class="feedback-card ${easyTooHard.length === 0 ? 'feedback-good' : 'feedback-warning'}">
+              <span class="feedback-icon">${easyTooHard.length === 0 ? '✅' : '⚠️'}</span>
+              <div>
+                <div class="feedback-title" style="color: ${easyTooHard.length === 0 ? '#22c55e' : '#fbbf24'};">
+                  ${easyTooHard.length === 0 ? '이지런 강도가 적절합니다!' : `${easyTooHard.length}개의 이지런이 너무 빠릅니다`}
+                </div>
+                <div class="feedback-text">
+                  ${easyTooHard.length === 0 
+                    ? '회복이 잘 되어 Sub-T 세션의 품질이 높아집니다.' 
+                    : 'Norwegian Singles는 이지런이 "정말 쉬워야" 작동합니다.'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">💡 맞춤 피드백</div>
+          
+          <div class="feedback-card ${isGoodQuality ? 'feedback-good' : 'feedback-warning'}">
+            <span class="feedback-icon">${isGoodQuality ? '✅' : '⚠️'}</span>
+            <div>
+              <div class="feedback-title" style="color: ${isGoodQuality ? '#22c55e' : '#fbbf24'};">
+                퀄리티 볼륨: ${qualityPercent}%
+              </div>
+              <div class="feedback-text">
+                ${isGoodQuality 
+                  ? '퀄리티 볼륨이 20-25% 범위 내에 있습니다. Norwegian Singles의 핵심 원칙을 잘 따르고 있습니다!' 
+                  : qualityPercent > 25 
+                    ? '퀄리티 볼륨이 너무 높습니다. 이지런을 늘리거나 Sub-T 세션을 줄이세요.' 
+                    : '퀄리티 볼륨이 조금 낮습니다. Sub-T 세션을 추가해보세요.'}
+              </div>
+            </div>
+          </div>
+
+          <div class="feedback-card feedback-info">
+            <span class="feedback-icon">📚</span>
+            <div>
+              <div class="feedback-title" style="color: #60a5fa;">Norwegian Singles 핵심 원칙</div>
+              <div class="feedback-text">
+                1. Sub-T는 "state"이지 "pace"가 아닙니다 - 날씨, 피로, 지형에 따라 조절하세요<br/>
+                2. Easy는 정말 easy - Sub-T 세션의 품질을 위해 필수입니다<br/>
+                3. 일관성이 핵심 - 같은 워크아웃을 매주 반복하며 점진적으로 발전하세요<br/>
+                4. "Wrecked"가 아닌 "Worked" - 세션 후 지쳤다면 너무 열심히 한 것입니다
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ===== Tab Switching =====
+    
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+      
+      ['dashboard', 'recommend', 'workouts', 'analysis', 'calculator', 'guide'].forEach(t => {
+        document.getElementById(t + 'Tab').classList.toggle('hidden', t !== tab);
+      });
+      
+      // 훈련 추천 탭 열 때 데이터 업데이트
+      if (tab === 'recommend') {
+        updateTrainingRecommendations();
+      }
+    }
+
+    // ===== Pace Editing =====
+    
+    function editPace(id) {
+      editingWorkout = id;
+      renderWorkouts();
+    }
+    
+    function savePace(id) {
+      const input = document.getElementById('paceInput-' + id);
+      const workout = workouts.find(w => w.id === id);
+      if (workout && input) {
+        workout.avgPace = input.value;
+        workout.needsPaceCorrection = false;
+      }
+      editingWorkout = null;
+      renderWorkouts();
+    }
+
+    // ===== Pace Calculator =====
+    
+    let selectedDistance = 'hm';
+    
+    // 레이스 거리 선택
+    function selectRaceDistance(distance) {
+      selectedDistance = distance;
+      
+      // 탭 활성화
+      document.querySelectorAll('.race-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.distance === distance);
+      });
+      
+      // 입력 필드 표시/숨김
+      ['hm', 'fm', '10k', '5k'].forEach(d => {
+        const el = document.getElementById('input-' + d);
+        if (el) el.style.display = d === distance ? 'block' : 'none';
+      });
+      
+      // 해당 거리로 계산
+      calculateFromDistance(distance);
+    }
+    
+    // 시간 문자열을 초로 변환
+    function parseTimeToSeconds(timeStr) {
+      if (!timeStr) return 0;
+      const parts = timeStr.trim().split(':');
+      if (parts.length === 3) {
+        return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+      } else if (parts.length === 2) {
+        return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+      }
+      return parseInt(parts[0]) * 60;
+    }
+    
+    // 초를 시간 문자열로 변환
+    function formatTime(seconds) {
+      if (isNaN(seconds) || seconds <= 0) return '--:--';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.round(seconds % 60);
+      
+      if (h > 0) {
+        return h + ':' + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
+      }
+      return m + ':' + s.toString().padStart(2, '0');
+    }
+    
+    // 페이스 포맷
+    function formatPace(seconds) {
+      if (isNaN(seconds) || seconds <= 0) return '--:--';
+      const min = Math.floor(seconds / 60);
+      const sec = Math.round(seconds % 60);
+      return min + ':' + (sec < 10 ? '0' : '') + sec;
+    }
+    
+    // Riegel 공식 기반 레이스 시간 변환
+    function convertRaceTime(fromTime, fromDistance, toDistance) {
+      // Riegel: T2 = T1 × (D2/D1)^1.06
+      const factor = Math.pow(toDistance / fromDistance, 1.06);
+      return fromTime * factor;
+    }
+    
+    // 거리별 계산
+    function calculateFromDistance(distance) {
+      let hmSeconds = 0;
+      const distances = { '5k': 5, '10k': 10, 'hm': 21.0975, 'fm': 42.195 };
+      
+      if (distance === 'hm') {
+        hmSeconds = parseTimeToSeconds(document.getElementById('hmInput')?.value);
+      } else if (distance === 'fm') {
+        const fmSeconds = parseTimeToSeconds(document.getElementById('fmInput')?.value);
+        hmSeconds = convertRaceTime(fmSeconds, 42.195, 21.0975);
+      } else if (distance === '10k') {
+        const tenKSeconds = parseTimeToSeconds(document.getElementById('tenKInput')?.value);
+        hmSeconds = convertRaceTime(tenKSeconds, 10, 21.0975);
+      } else if (distance === '5k') {
+        const fiveKSeconds = parseTimeToSeconds(document.getElementById('fiveKInput')?.value);
+        hmSeconds = convertRaceTime(fiveKSeconds, 5, 21.0975);
+      }
+      
+      if (hmSeconds <= 0) return;
+      
+      // 모든 환산 시간 계산
+      const fiveKSeconds = convertRaceTime(hmSeconds, 21.0975, 5);
+      const tenKSeconds = convertRaceTime(hmSeconds, 21.0975, 10);
+      const fmSeconds = convertRaceTime(hmSeconds, 21.0975, 42.195);
+      
+      // 환산 시간 표시
+      document.getElementById('conv5k').textContent = formatTime(fiveKSeconds);
+      document.getElementById('conv10k').textContent = formatTime(tenKSeconds);
+      document.getElementById('convHM').textContent = formatTime(hmSeconds);
+      document.getElementById('convFM').textContent = formatTime(fmSeconds);
+      
+      // 페이스 계산
+      const hmPacePerKm = hmSeconds / 21.0975;
+      const fiveKPace = fiveKSeconds / 5;
+      const tenKPace = tenKSeconds / 10;
+      const fmPace = fmSeconds / 42.195;
+      const easyPaceSeconds = hmPacePerKm * 1.35;
+      
+      // Sub-T 페이스 (HM 페이스 기반)
+      document.getElementById('shortPace').textContent = formatPace(hmPacePerKm * 0.97);
+      document.getElementById('mediumPace').textContent = formatPace(hmPacePerKm);
+      document.getElementById('longPace').textContent = formatPace(hmPacePerKm * 1.03);
+      document.getElementById('easyPace').textContent = formatPace(easyPaceSeconds) + '/km 또는 더 느리게';
+      
+      // 페이스 차트 업데이트
+      document.getElementById('pace5k').textContent = formatPace(fiveKPace);
+      document.getElementById('pace10k').textContent = formatPace(tenKPace);
+      document.getElementById('paceSubT').textContent = formatPace(hmPacePerKm);
+      document.getElementById('paceHM').textContent = formatPace(hmPacePerKm);
+      document.getElementById('paceFM').textContent = formatPace(fmPace);
+      document.getElementById('paceEasyBar').textContent = formatPace(easyPaceSeconds);
+      
+      // 바 높이 조정 (페이스가 빠를수록 높게)
+      const basePace = hmPacePerKm;
+      const maxHeight = 100;
+      document.getElementById('bar5k').style.height = Math.min(maxHeight, (basePace / fiveKPace) * 80) + 'px';
+      document.getElementById('bar10k').style.height = Math.min(maxHeight, (basePace / tenKPace) * 80) + 'px';
+      document.getElementById('barSubT').style.height = '80px';
+      document.getElementById('barHM').style.height = '75px';
+      document.getElementById('barFM').style.height = Math.min(maxHeight, (basePace / fmPace) * 80) + 'px';
+      document.getElementById('barEasy').style.height = Math.min(maxHeight, (basePace / easyPaceSeconds) * 80) + 'px';
+    }
+    
+    // 훈련 데이터 기반 예상 레이스 시간 계산
+    function updatePredictedRaceTimes() {
+      const predictedSection = document.getElementById('predictedRaceTimes');
+      if (!predictedSection) return;
+      
+      // Sub-T 세션 필터링
+      const subTWorkouts = workouts.filter(w => w.type === 'sub-t' && w.avgPace && w.avgPace !== 'N/A');
+      
+      if (subTWorkouts.length === 0) {
+        predictedSection.style.display = 'none';
+        return;
+      }
+      
+      // Sub-T 평균 페이스 계산
+      let totalPaceSeconds = 0;
+      let validCount = 0;
+      
+      subTWorkouts.forEach(w => {
+        const parts = w.avgPace.split(':');
+        if (parts.length === 2) {
+          const paceSeconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          if (paceSeconds > 0 && paceSeconds < 600) { // 유효한 페이스만 (10분/km 미만)
+            totalPaceSeconds += paceSeconds;
+            validCount++;
+          }
+        }
+      });
+      
+      if (validCount === 0) {
+        predictedSection.style.display = 'none';
+        return;
+      }
+      
+      const avgSubTPace = totalPaceSeconds / validCount;
+      
+      // Sub-T 페이스 ≈ HM 페이스
+      const predictedHMSeconds = avgSubTPace * 21.0975;
+      const predicted5KSeconds = convertRaceTime(predictedHMSeconds, 21.0975, 5);
+      const predicted10KSeconds = convertRaceTime(predictedHMSeconds, 21.0975, 10);
+      const predictedFMSeconds = convertRaceTime(predictedHMSeconds, 21.0975, 42.195);
+      
+      // UI 업데이트
+      document.getElementById('predicted5k').textContent = formatTime(predicted5KSeconds);
+      document.getElementById('predicted10k').textContent = formatTime(predicted10KSeconds);
+      document.getElementById('predictedHM').textContent = formatTime(predictedHMSeconds);
+      document.getElementById('predictedFM').textContent = formatTime(predictedFMSeconds);
+      document.getElementById('predictionBasis').textContent = 
+        `${validCount}개 Sub-T 세션의 평균 페이스 ${formatPace(avgSubTPace)}/km 기반`;
+      
+      predictedSection.style.display = 'block';
+      
+      // 계산기에 예상 HM 시간 자동 입력 (옵션)
+      const hmInput = document.getElementById('hmInput');
+      if (hmInput && hmInput.value === '1:45:00') {
+        hmInput.value = formatTime(predictedHMSeconds);
+        calculateFromDistance('hm');
+      }
+    }
+    
+    // 기존 calculatePaces 함수 (호환성 유지)
+    function calculatePaces() {
+      calculateFromDistance('hm');
+    }
+
+    // ===== Training Recommendations =====
+    
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const workoutTypes = {
+      'sub-t-short': { name: '짧은 Sub-T', desc: '6×1000m (60초 휴식)', icon: '🔥', color: '#fbbf24' },
+      'sub-t-medium': { name: '중간 Sub-T', desc: '4×2000m (75초 휴식)', icon: '🔥', color: '#fbbf24' },
+      'sub-t-long': { name: '긴 Sub-T', desc: '3×10분 (90초 휴식)', icon: '🔥', color: '#fbbf24' },
+      'easy': { name: 'Easy Run', desc: '40-60분 @ Easy 페이스', icon: '🚶', color: '#22c55e' },
+      'long': { name: 'Long Run', desc: '90-120분 @ Easy 페이스', icon: '🏃', color: '#a78bfa' },
+      'rest': { name: '휴식', desc: '완전 휴식 또는 가벼운 활동', icon: '😴', color: '#64748b' }
+    };
+    
+    // 이번 주 훈련 기록 분석
+    function analyzeThisWeek() {
+      const today = new Date();
+      const dayOfWeek = today.getDay(); // 0 = 일요일
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - dayOfWeek);
+      startOfWeek.setHours(0, 0, 0, 0);
+      
+      // 이번 주 운동 필터링
+      const thisWeekWorkouts = workouts.filter(w => {
+        const workoutDate = new Date(w.date);
+        return workoutDate >= startOfWeek && workoutDate <= today;
+      });
+      
+      // 요일별 운동 매핑
+      const workoutsByDay = {};
+      thisWeekWorkouts.forEach(w => {
+        const d = new Date(w.date);
+        const day = d.getDay();
+        workoutsByDay[day] = w;
+      });
+      
+      return {
+        workouts: thisWeekWorkouts,
+        byDay: workoutsByDay,
+        subTCount: thisWeekWorkouts.filter(w => w.type === 'sub-t').length,
+        easyCount: thisWeekWorkouts.filter(w => w.type === 'easy').length,
+        longCount: thisWeekWorkouts.filter(w => w.type === 'long').length,
+        dayOfWeek: dayOfWeek
+      };
+    }
+    
+    // 오늘의 훈련 추천 로직
+    function getTodayRecommendation() {
+      const analysis = analyzeThisWeek();
+      const today = analysis.dayOfWeek;
+      const todayWorkout = analysis.byDay[today];
+      
+      // 이미 오늘 운동했으면
+      if (todayWorkout) {
+        return {
+          type: 'completed',
+          workout: todayWorkout,
+          message: '오늘 훈련 완료! 🎉'
+        };
+      }
+      
+      // 어제 운동 확인
+      const yesterday = (today + 6) % 7;
+      const yesterdayWorkout = analysis.byDay[yesterday];
+      const yesterdayWasHard = yesterdayWorkout && (yesterdayWorkout.type === 'sub-t' || yesterdayWorkout.type === 'long');
+      
+      // 추천 로직
+      let recommendation;
+      
+      // 일요일 = Long Run
+      if (today === 0) {
+        if (analysis.longCount === 0) {
+          recommendation = { type: 'long', reason: '주간 Long Run' };
+        } else {
+          recommendation = { type: 'easy', reason: '이미 Long Run 완료, 회복 필요' };
+        }
+      }
+      // Sub-T 부족 & 어제 쉬웠으면 Sub-T
+      else if (analysis.subTCount < 2 && !yesterdayWasHard) {
+        const subTypes = ['sub-t-short', 'sub-t-medium', 'sub-t-long'];
+        const subTypeIndex = analysis.subTCount % 3;
+        recommendation = { 
+          type: subTypes[subTypeIndex], 
+          reason: `이번 주 Sub-T ${analysis.subTCount}/2-3회` 
+        };
+      }
+      // Sub-T 2회 이상 & 어제 쉬웠으면 추가 Sub-T 가능
+      else if (analysis.subTCount >= 2 && analysis.subTCount < 3 && !yesterdayWasHard && today !== 0) {
+        recommendation = { type: 'sub-t-medium', reason: '선택적 추가 Sub-T 세션' };
+      }
+      // 어제 힘들었으면 Easy
+      else if (yesterdayWasHard) {
+        recommendation = { type: 'easy', reason: '회복일 - 어제 고강도 훈련' };
+      }
+      // 기본 Easy
+      else {
+        recommendation = { type: 'easy', reason: '베이스 유지' };
+      }
+      
+      return {
+        type: 'recommended',
+        recommendation: recommendation,
+        analysis: analysis
+      };
+    }
+    
+    // 대시보드 오늘의 훈련 카드 업데이트
+    function updateTodayRecommendCard() {
+      const container = document.getElementById('todayRecommend');
+      if (!container) return;
+      
+      const result = getTodayRecommendation();
+      const today = new Date();
+      const dateStr = `${today.getMonth() + 1}월 ${today.getDate()}일 (${dayNames[today.getDay()]})`;
+      
+      if (result.type === 'completed') {
+        const w = result.workout;
+        const wType = workoutTypes[w.type] || workoutTypes['easy'];
+        container.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="width: 60px; height: 60px; border-radius: 16px; background: rgba(34,197,94,0.2); display: flex; align-items: center; justify-content: center; font-size: 28px;">✅</div>
+            <div style="flex: 1;">
+              <div style="font-size: 13px; color: #64748b;">${dateStr}</div>
+              <div style="font-size: 20px; font-weight: 700; color: #22c55e; margin: 4px 0;">훈련 완료!</div>
+              <div style="font-size: 14px; color: #94a3b8;">${wType.icon} ${w.name} - ${w.distance}km, ${w.duration}분</div>
+            </div>
+          </div>
+        `;
+      } else {
+        const rec = result.recommendation;
+        const wType = workoutTypes[rec.type];
+        container.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="width: 60px; height: 60px; border-radius: 16px; background: rgba(245,158,11,0.2); display: flex; align-items: center; justify-content: center; font-size: 28px;">${wType.icon}</div>
+            <div style="flex: 1;">
+              <div style="font-size: 13px; color: #64748b;">${dateStr}</div>
+              <div style="font-size: 20px; font-weight: 700; color: ${wType.color}; margin: 4px 0;">${wType.name}</div>
+              <div style="font-size: 14px; color: #94a3b8;">${wType.desc}</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 4px;">💡 ${rec.reason}</div>
+            </div>
+          </div>
+        `;
+      }
+    }
+    
+    // 훈련 추천 탭 전체 업데이트
+    function updateTrainingRecommendations() {
+      updateTodayWorkoutDetail();
+      updateWeeklyPlan();
+      updateNextWeekPreview();
+    }
+    
+    // 오늘의 훈련 상세
+    function updateTodayWorkoutDetail() {
+      const container = document.getElementById('todayWorkoutDetail');
+      if (!container) return;
+      
+      const result = getTodayRecommendation();
+      const today = new Date();
+      const dateStr = `${today.getMonth() + 1}월 ${today.getDate()}일 (${dayNames[today.getDay()]})`;
+      
+      // 계산기에서 페이스 가져오기
+      const shortPace = document.getElementById('shortPace')?.textContent || '4:50';
+      const mediumPace = document.getElementById('mediumPace')?.textContent || '5:00';
+      const longPace = document.getElementById('longPace')?.textContent || '5:09';
+      const easyPace = document.getElementById('easyPace')?.textContent?.split('/')[0] || '6:45';
+      
+      if (result.type === 'completed') {
+        const w = result.workout;
+        container.innerHTML = `
+          <div style="text-align: center; padding: 20px;">
+            <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+            <div style="font-size: 24px; font-weight: 700; color: #22c55e; margin-bottom: 8px;">오늘 훈련 완료!</div>
+            <div style="color: #94a3b8;">${w.name} - ${w.distance}km, ${w.duration}분</div>
+            <div style="margin-top: 16px; padding: 12px; background: rgba(34,197,94,0.1); border-radius: 10px; display: inline-block;">
+              <span style="color: #22c55e;">내일을 위해 충분히 쉬세요 😊</span>
+            </div>
+          </div>
+        `;
+      } else {
+        const rec = result.recommendation;
+        const wType = workoutTypes[rec.type];
+        
+        let detailContent = '';
+        
+        if (rec.type.startsWith('sub-t')) {
+          const pace = rec.type === 'sub-t-short' ? shortPace : rec.type === 'sub-t-medium' ? mediumPace : longPace;
+          detailContent = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 20px;">
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 페이스</div>
+                <div style="font-size: 24px; font-weight: 700; color: #fbbf24;">${pace}/km</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 RPE</div>
+                <div style="font-size: 24px; font-weight: 700; color: #fbbf24;">5-6</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 HR</div>
+                <div style="font-size: 24px; font-weight: 700; color: #fbbf24;">82-88%</div>
+              </div>
+            </div>
+            <div style="margin-top: 16px; padding: 16px; background: rgba(59,130,246,0.1); border-radius: 12px;">
+              <div style="font-weight: 600; color: #60a5fa; margin-bottom: 8px;">💡 세션 팁</div>
+              <ul style="color: #94a3b8; padding-left: 20px; font-size: 14px; line-height: 1.8;">
+                <li>워밍업 10-15분 (Easy 페이스)</li>
+                <li>"Comfortably Hard" 느낌 유지</li>
+                <li>마지막 인터벌도 첫 번째처럼</li>
+                <li>쿨다운 10분</li>
+              </ul>
+            </div>
+          `;
+        } else if (rec.type === 'long') {
+          detailContent = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 20px;">
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 시간</div>
+                <div style="font-size: 24px; font-weight: 700; color: #a78bfa;">90-120분</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">페이스</div>
+                <div style="font-size: 24px; font-weight: 700; color: #a78bfa;">${easyPace}/km</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 HR</div>
+                <div style="font-size: 24px; font-weight: 700; color: #a78bfa;">&lt;70%</div>
+              </div>
+            </div>
+            <div style="margin-top: 16px; padding: 16px; background: rgba(139,92,246,0.1); border-radius: 12px;">
+              <div style="font-weight: 600; color: #a78bfa; margin-bottom: 8px;">💡 Long Run 팁</div>
+              <ul style="color: #94a3b8; padding-left: 20px; font-size: 14px; line-height: 1.8;">
+                <li>Easy 페이스 유지 - 빨라지지 않기!</li>
+                <li>수분 보충 준비</li>
+                <li>마지막 30분도 첫 30분처럼 느껴야 함</li>
+              </ul>
+            </div>
+          `;
+        } else {
+          detailContent = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 20px;">
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 시간</div>
+                <div style="font-size: 24px; font-weight: 700; color: #22c55e;">40-60분</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">페이스</div>
+                <div style="font-size: 24px; font-weight: 700; color: #22c55e;">${easyPace}/km+</div>
+              </div>
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px; text-align: center;">
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">목표 HR</div>
+                <div style="font-size: 24px; font-weight: 700; color: #22c55e;">&lt;70%</div>
+              </div>
+            </div>
+            <div style="margin-top: 16px; padding: 16px; background: rgba(34,197,94,0.1); border-radius: 12px;">
+              <div style="font-weight: 600; color: #22c55e; margin-bottom: 8px;">💡 Easy Run 팁</div>
+              <ul style="color: #94a3b8; padding-left: 20px; font-size: 14px; line-height: 1.8;">
+                <li>대화가 편하게 가능해야 함</li>
+                <li>"너무 느린 것 같은데?" = 정확히 맞음!</li>
+                <li>다음 Sub-T를 위한 회복이 목적</li>
+              </ul>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+            <div style="width: 80px; height: 80px; border-radius: 20px; background: rgba(245,158,11,0.15); display: flex; align-items: center; justify-content: center; font-size: 40px;">${wType.icon}</div>
+            <div style="flex: 1; min-width: 200px;">
+              <div style="font-size: 13px; color: #64748b;">${dateStr}</div>
+              <div style="font-size: 28px; font-weight: 700; color: ${wType.color}; margin: 4px 0;">${wType.name}</div>
+              <div style="font-size: 16px; color: #cbd5e1;">${wType.desc}</div>
+            </div>
+          </div>
+          ${detailContent}
+        `;
+      }
+    }
+    
+    // 이번 주 훈련 계획
+    function updateWeeklyPlan() {
+      const container = document.getElementById('weeklyPlan');
+      if (!container) return;
+      
+      const analysis = analyzeThisWeek();
+      const today = new Date();
+      const todayDay = today.getDay();
+      
+      // 이번 주 계획 생성
+      const weekPlan = [];
+      for (let i = 0; i < 7; i++) {
+        const dayDate = new Date(today);
+        dayDate.setDate(today.getDate() - todayDay + i);
+        
+        const existingWorkout = analysis.byDay[i];
+        let planned;
+        
+        if (existingWorkout) {
+          planned = { type: existingWorkout.type, status: 'completed', workout: existingWorkout };
+        } else if (i < todayDay) {
+          planned = { type: 'rest', status: 'missed' };
+        } else if (i === todayDay) {
+          const rec = getTodayRecommendation();
+          if (rec.type === 'completed') {
+            planned = { type: rec.workout.type, status: 'completed', workout: rec.workout };
+          } else {
+            planned = { type: rec.recommendation.type.replace('-short', '').replace('-medium', '').replace('-long', ''), status: 'today' };
+          }
+        } else {
+          // 미래 날짜 추천
+          if (i === 0) { // 일요일
+            planned = { type: 'long', status: 'planned' };
+          } else if (i === 2 || i === 4 || i === 6) { // 화, 목, 토
+            const futureSubTCount = analysis.subTCount + weekPlan.filter(p => p.type === 'sub-t').length;
+            if (futureSubTCount < 3) {
+              planned = { type: 'sub-t', status: 'planned' };
+            } else {
+              planned = { type: 'easy', status: 'planned' };
+            }
+          } else {
+            planned = { type: 'easy', status: 'planned' };
+          }
+        }
+        
+        weekPlan.push({
+          day: i,
+          date: dayDate,
+          ...planned
+        });
+      }
+      
+      container.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;">
+          ${weekPlan.map(p => {
+            const wType = workoutTypes[p.type] || workoutTypes['easy'];
+            const isToday = p.day === todayDay;
+            const opacity = p.status === 'missed' ? '0.4' : '1';
+            const border = isToday ? 'border: 2px solid #fbbf24;' : '';
+            
+            let statusIcon = '';
+            if (p.status === 'completed') statusIcon = '✓';
+            else if (p.status === 'missed') statusIcon = '✗';
+            else if (p.status === 'today') statusIcon = '→';
+            
+            return `
+              <div style="text-align: center; padding: 12px 4px; background: rgba(30,41,59,0.5); border-radius: 12px; opacity: ${opacity}; ${border}">
+                <div style="font-size: 11px; color: #64748b;">${dayNames[p.day]}</div>
+                <div style="font-size: 10px; color: #475569;">${p.date.getDate()}일</div>
+                <div style="font-size: 24px; margin: 6px 0;">${wType.icon}</div>
+                <div style="font-size: 10px; color: ${wType.color};">${p.type === 'sub-t' ? 'Sub-T' : p.type === 'long' ? 'Long' : p.type === 'rest' ? '휴식' : 'Easy'}</div>
+                ${statusIcon ? `<div style="font-size: 12px; margin-top: 4px; color: ${p.status === 'completed' ? '#22c55e' : p.status === 'missed' ? '#64748b' : '#fbbf24'};">${statusIcon}</div>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <div style="margin-top: 16px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; font-size: 12px;">
+          <span style="color: #22c55e;">✓ 완료</span>
+          <span style="color: #fbbf24;">→ 오늘</span>
+          <span style="color: #64748b;">✗ 미실시</span>
+          <span style="color: #94a3b8;">○ 예정</span>
+        </div>
+      `;
+    }
+    
+    // 다음 주 미리보기
+    function updateNextWeekPreview() {
+      const container = document.getElementById('nextWeekPreview');
+      if (!container) return;
+      
+      const nextWeekPlan = [
+        { day: 1, type: 'easy', desc: 'Easy Run 40-60분' },
+        { day: 2, type: 'sub-t', desc: '짧은 인터벌 6×1000m' },
+        { day: 3, type: 'easy', desc: 'Easy Run 40-60분' },
+        { day: 4, type: 'sub-t', desc: '중간 인터벌 4×2000m' },
+        { day: 5, type: 'easy', desc: 'Easy Run 40-60분' },
+        { day: 6, type: 'sub-t', desc: '긴 인터벌 3×10분' },
+        { day: 0, type: 'long', desc: 'Long Run 90-120분' }
+      ];
+      
+      container.innerHTML = `
+        <div style="display: grid; gap: 8px;">
+          ${nextWeekPlan.map(p => {
+            const wType = workoutTypes[p.type] || workoutTypes['easy'];
+            return `
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(30,41,59,0.3); border-radius: 10px;">
+                <div style="width: 36px; text-align: center; font-size: 13px; color: #64748b;">${dayNames[p.day]}</div>
+                <div style="font-size: 20px;">${wType.icon}</div>
+                <div style="flex: 1; font-size: 14px; color: #cbd5e1;">${p.desc}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <div style="margin-top: 12px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 10px; font-size: 13px; color: #94a3b8; text-align: center;">
+          💡 이 패턴을 매주 반복하며 점진적으로 발전하세요
+        </div>
+      `;
+    }
+
+    // ===== Initialize =====
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      checkLoginStatus();
+      calculatePaces();
+    });
+  </script>
+</body>
+</html>
