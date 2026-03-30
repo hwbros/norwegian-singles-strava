@@ -150,6 +150,8 @@
     .workout-stat { text-align: center; }
     .workout-stat-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
     .workout-stat-value { font-size: 16px; font-weight: 600; }
+    .workout-stat-value.corrected { color: #22c55e; }
+    .workout-stat-value.corrected::after { content: ' ✓'; font-size: 12px; }
     
     /* Edit controls */
     .edit-btn { 
@@ -991,6 +993,10 @@
 
     // ===== Rendering =====
     
+    // 선택된 운동 상세 정보 (랩 분석용)
+    let selectedActivity = null;
+    let loadingActivity = null;
+    
     function renderWorkouts() {
       const container = document.getElementById('workoutsList');
       
@@ -1009,10 +1015,17 @@
       
       let html = '';
       workouts.forEach(w => {
+        const isExpanded = selectedActivity?.id === w.id;
+        const isLoading = loadingActivity === w.id;
+        
+        // 수정된 페이스가 있으면 표시
+        const displayPace = w.userCorrectedIntervalPace || w.userCorrectedPace || w.avgPace;
+        const hasCorrection = w.userCorrectedPace || w.userCorrectedIntervalPace;
+        
         html += `
-          <div class="workout-card">
+          <div class="workout-card ${isExpanded ? 'expanded' : ''}">
             <div class="workout-header">
-              <div>
+              <div style="flex: 1;">
                 <div class="workout-title">
                   ${w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : '🚶'} ${w.name}
                 </div>
@@ -1023,21 +1036,22 @@
                   </span>
                   ${w.subType ? `<span class="badge badge-sub-t">${w.subType === 'short' ? '짧은 인터벌' : w.subType === 'medium' ? '중간 인터벌' : '긴 인터벌'}</span>` : ''}
                   ${w.isTreadmill ? '<span class="badge badge-treadmill">🏃‍♂️ Treadmill</span>' : ''}
-                  ${w.needsPaceCorrection ? '<span class="badge badge-warning">⚠️ 페이스 수정 필요</span>' : ''}
+                  ${w.needsPaceCorrection && !hasCorrection ? '<span class="badge badge-warning">⚠️ 페이스 수정 필요</span>' : ''}
+                  ${hasCorrection ? '<span class="badge badge-success">✅ 수정됨</span>' : ''}
                 </div>
               </div>
-              ${w.isTreadmill ? `
-                <div>
-                  ${editingWorkout === w.id ? `
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                      <input type="text" class="edit-input" id="paceInput-${w.id}" value="${w.avgPace}" />
-                      <button class="save-btn" onclick="savePace(${w.id})">✓</button>
-                    </div>
-                  ` : `
-                    <button class="edit-btn" onclick="editPace(${w.id})">✏️ 페이스 수정</button>
-                  `}
-                </div>
-              ` : ''}
+              <div style="display: flex; gap: 8px;">
+                ${w.type === 'sub-t' ? `
+                  <button class="btn btn-secondary" style="padding: 8px 12px; font-size: 13px;" onclick="toggleActivityDetail(${w.id})">
+                    ${isLoading ? '⏳' : isExpanded ? '▲ 접기' : '▼ 인터벌 분석'}
+                  </button>
+                ` : ''}
+                ${w.isTreadmill ? `
+                  <button class="btn btn-secondary" style="padding: 8px 12px; font-size: 13px;" onclick="openPaceModal(${w.id})">
+                    ✏️ 페이스 수정
+                  </button>
+                ` : ''}
+              </div>
             </div>
 
             <div class="workout-stats">
@@ -1051,7 +1065,7 @@
               </div>
               <div class="workout-stat">
                 <div class="workout-stat-label">평균 페이스</div>
-                <div class="workout-stat-value">${w.avgPace}/km</div>
+                <div class="workout-stat-value ${hasCorrection ? 'corrected' : ''}">${displayPace}/km</div>
               </div>
               <div class="workout-stat">
                 <div class="workout-stat-label">평균 HR</div>
@@ -1066,11 +1080,223 @@
                 <div class="workout-stat-value">${w.calories || '-'}</div>
               </div>
             </div>
+            
+            ${isExpanded && selectedActivity ? renderActivityDetail(selectedActivity) : ''}
           </div>
         `;
       });
       
       container.innerHTML = html;
+    }
+    
+    // 활동 상세 정보 토글
+    async function toggleActivityDetail(id) {
+      if (selectedActivity?.id === id) {
+        selectedActivity = null;
+        renderWorkouts();
+        return;
+      }
+      
+      loadingActivity = id;
+      renderWorkouts();
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/activity/${id}`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          selectedActivity = data.activity;
+        }
+      } catch (error) {
+        console.error('활동 상세 조회 실패:', error);
+      }
+      
+      loadingActivity = null;
+      renderWorkouts();
+    }
+    
+    // 활동 상세 렌더링 (인터벌 분석)
+    function renderActivityDetail(activity) {
+      const stats = activity.intervalStats;
+      const laps = activity.laps || [];
+      
+      let html = `<div class="activity-detail" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(100,116,139,0.3);">`;
+      
+      // 인터벌 통계 (워밍업/쿨다운 제외)
+      if (stats) {
+        html += `
+          <div style="margin-bottom: 16px; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
+            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 12px;">🎯 인터벌 구간만의 통계 (워밍업/쿨다운 제외)</div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; text-align: center;">
+              <div>
+                <div style="font-size: 12px; color: #64748b;">인터벌 수</div>
+                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.count}개</div>
+              </div>
+              <div>
+                <div style="font-size: 12px; color: #64748b;">인터벌 거리</div>
+                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.totalDistance}km</div>
+              </div>
+              <div>
+                <div style="font-size: 12px; color: #64748b;">인터벌 평균 페이스</div>
+                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.avgPace}/km</div>
+              </div>
+              <div>
+                <div style="font-size: 12px; color: #64748b;">인터벌 평균 HR</div>
+                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.avgHR || '-'}bpm</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      
+      // 랩 상세
+      if (laps.length > 0) {
+        html += `
+          <div style="font-weight: 600; margin-bottom: 12px;">📋 랩 분석</div>
+          <div style="display: grid; gap: 8px;">
+        `;
+        
+        laps.forEach(lap => {
+          const categoryColors = {
+            'warmup': { bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.3)', text: '#60a5fa', label: '🔥 워밍업' },
+            'cooldown': { bg: 'rgba(139,92,246,0.1)', border: 'rgba(139,92,246,0.3)', text: '#a78bfa', label: '❄️ 쿨다운' },
+            'interval': { bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)', text: '#fbbf24', label: '⚡ 인터벌' },
+            'recovery': { bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.3)', text: '#22c55e', label: '🚶 휴식' },
+            'unknown': { bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.3)', text: '#94a3b8', label: '?' }
+          };
+          const cat = categoryColors[lap.category] || categoryColors.unknown;
+          
+          html += `
+            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 8px;">
+              <div style="width: 80px; font-size: 12px; color: ${cat.text}; font-weight: 600;">${cat.label}</div>
+              <div style="flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 13px;">
+                <div><span style="color: #64748b;">거리:</span> ${lap.distance}km</div>
+                <div><span style="color: #64748b;">시간:</span> ${lap.duration}분</div>
+                <div><span style="color: #64748b;">페이스:</span> <strong>${lap.pace}</strong>/km</div>
+                <div><span style="color: #64748b;">HR:</span> ${lap.avgHR || '-'}bpm</div>
+              </div>
+            </div>
+          `;
+        });
+        
+        html += `</div>`;
+      }
+      
+      html += `</div>`;
+      return html;
+    }
+    
+    // 페이스 수정 모달
+    function openPaceModal(id) {
+      const workout = workouts.find(w => w.id === id);
+      if (!workout) return;
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.id = 'paceModal';
+      modal.innerHTML = `
+        <div class="modal" style="max-width: 480px;">
+          <h2 style="margin-bottom: 8px;">✏️ 트레드밀 페이스 수정</h2>
+          <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">
+            트레드밀에서 실제로 뛴 페이스를 입력해주세요
+          </p>
+          
+          <div class="form-group">
+            <label>전체 평균 페이스</label>
+            <input type="text" class="form-input" id="correctedPace" 
+              value="${workout.userCorrectedPace || workout.avgPace}" 
+              placeholder="5:30">
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+              Strava 기록: ${workout.avgPace}/km
+            </div>
+          </div>
+          
+          ${workout.type === 'sub-t' ? `
+            <div class="form-group" style="margin-top: 16px;">
+              <label>인터벌 구간 평균 페이스 (선택)</label>
+              <input type="text" class="form-input" id="correctedIntervalPace" 
+                value="${workout.userCorrectedIntervalPace || ''}" 
+                placeholder="5:00">
+              <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+                워밍업/휴식 제외한 실제 인터벌 페이스
+              </div>
+            </div>
+          ` : ''}
+          
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" style="flex: 1;" onclick="savePaceCorrection(${id})">
+              저장
+            </button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closePaceModal()">
+              취소
+            </button>
+          </div>
+          
+          ${workout.userCorrectedPace ? `
+            <button class="btn btn-danger" style="width: 100%; margin-top: 12px;" onclick="clearPaceCorrection(${id})">
+              수정 초기화
+            </button>
+          ` : ''}
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function closePaceModal() {
+      const modal = document.getElementById('paceModal');
+      if (modal) modal.remove();
+    }
+    
+    async function savePaceCorrection(id) {
+      const pace = document.getElementById('correctedPace')?.value;
+      const intervalPace = document.getElementById('correctedIntervalPace')?.value;
+      
+      try {
+        await fetch(`${API_BASE}/api/strava/activity/${id}/correct`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ pace, intervalPace })
+        });
+        
+        // 로컬 데이터 업데이트
+        const workout = workouts.find(w => w.id === id);
+        if (workout) {
+          workout.userCorrectedPace = pace;
+          workout.userCorrectedIntervalPace = intervalPace;
+          workout.needsPaceCorrection = false;
+        }
+        
+        closePaceModal();
+        renderWorkouts();
+        updatePredictedRaceTimes();
+      } catch (error) {
+        console.error('페이스 수정 저장 실패:', error);
+      }
+    }
+    
+    async function clearPaceCorrection(id) {
+      try {
+        await fetch(`${API_BASE}/api/strava/activity/${id}/correct`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        const workout = workouts.find(w => w.id === id);
+        if (workout) {
+          workout.userCorrectedPace = null;
+          workout.userCorrectedIntervalPace = null;
+          workout.needsPaceCorrection = workout.isTreadmill;
+        }
+        
+        closePaceModal();
+        renderWorkouts();
+      } catch (error) {
+        console.error('페이스 수정 초기화 실패:', error);
+      }
     }
     
     function updateDashboard() {
@@ -1454,12 +1680,17 @@
         return;
       }
       
-      // Sub-T 평균 페이스 계산
+      // Sub-T 평균 페이스 계산 (수정된 인터벌 페이스 우선 사용)
       let totalPaceSeconds = 0;
       let validCount = 0;
+      let hasCorrectedPace = false;
       
       subTWorkouts.forEach(w => {
-        const parts = w.avgPace.split(':');
+        // 우선순위: 수정된 인터벌 페이스 > 수정된 평균 페이스 > 원본 페이스
+        const paceToUse = w.userCorrectedIntervalPace || w.userCorrectedPace || w.avgPace;
+        if (w.userCorrectedIntervalPace || w.userCorrectedPace) hasCorrectedPace = true;
+        
+        const parts = paceToUse.split(':');
         if (parts.length === 2) {
           const paceSeconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
           if (paceSeconds > 0 && paceSeconds < 600) { // 유효한 페이스만 (10분/km 미만)
@@ -1488,7 +1719,7 @@
       document.getElementById('predictedHM').textContent = formatTime(predictedHMSeconds);
       document.getElementById('predictedFM').textContent = formatTime(predictedFMSeconds);
       document.getElementById('predictionBasis').textContent = 
-        `${validCount}개 Sub-T 세션의 평균 페이스 ${formatPace(avgSubTPace)}/km 기반`;
+        `${validCount}개 Sub-T 세션의 평균 페이스 ${formatPace(avgSubTPace)}/km 기반${hasCorrectedPace ? ' (수정된 페이스 포함)' : ''}`;
       
       predictedSection.style.display = 'block';
       
@@ -1555,50 +1786,82 @@
       const today = analysis.dayOfWeek;
       const todayWorkout = analysis.byDay[today];
       
-      // 이미 오늘 운동했으면
-      if (todayWorkout) {
-        return {
-          type: 'completed',
-          workout: todayWorkout,
-          message: '오늘 훈련 완료! 🎉'
-        };
-      }
-      
       // 어제 운동 확인
       const yesterday = (today + 6) % 7;
       const yesterdayWorkout = analysis.byDay[yesterday];
       const yesterdayWasHard = yesterdayWorkout && (yesterdayWorkout.type === 'sub-t' || yesterdayWorkout.type === 'long');
       
+      // 예상 추천 계산 (실제 운동 전 기준)
+      let expectedType = 'easy';
+      let expectedReason = '';
+      
+      if (today === 0) {
+        expectedType = analysis.longCount === 0 ? 'long' : 'easy';
+        expectedReason = analysis.longCount === 0 ? '주간 Long Run' : '이미 Long Run 완료';
+      } else if (analysis.subTCount < 2 && !yesterdayWasHard) {
+        expectedType = 'sub-t';
+        expectedReason = `이번 주 Sub-T ${analysis.subTCount}/2-3회`;
+      } else if (analysis.subTCount >= 2 && analysis.subTCount < 3 && !yesterdayWasHard) {
+        expectedType = 'sub-t';
+        expectedReason = '선택적 추가 Sub-T 세션';
+      } else if (yesterdayWasHard) {
+        expectedType = 'easy';
+        expectedReason = '회복일 - 어제 고강도 훈련';
+      } else {
+        expectedType = 'easy';
+        expectedReason = '베이스 유지';
+      }
+      
+      // 이미 오늘 운동했으면
+      if (todayWorkout) {
+        // 계획 vs 실제 비교
+        const actualType = todayWorkout.type;
+        const mismatch = (expectedType === 'sub-t' && actualType !== 'sub-t') ||
+                         (expectedType === 'long' && actualType !== 'long') ||
+                         (expectedType === 'easy' && actualType === 'sub-t' && yesterdayWasHard);
+        
+        let mismatchMessage = null;
+        if (mismatch) {
+          if (expectedType === 'sub-t' && actualType === 'easy') {
+            mismatchMessage = '⚠️ 오늘은 Sub-T 추천이었지만 Easy Run을 했습니다';
+          } else if (expectedType === 'easy' && actualType === 'sub-t') {
+            mismatchMessage = '⚠️ 어제 고강도 훈련 후 회복이 필요했지만 Sub-T를 했습니다';
+          } else if (expectedType === 'long' && actualType !== 'long') {
+            mismatchMessage = '⚠️ 이번 주 Long Run이 아직 없습니다';
+          }
+        }
+        
+        return {
+          type: 'completed',
+          workout: todayWorkout,
+          message: '오늘 훈련 완료! 🎉',
+          expected: { type: expectedType, reason: expectedReason },
+          mismatch: mismatch,
+          mismatchMessage: mismatchMessage
+        };
+      }
+      
       // 추천 로직
       let recommendation;
       
-      // 일요일 = Long Run
       if (today === 0) {
         if (analysis.longCount === 0) {
           recommendation = { type: 'long', reason: '주간 Long Run' };
         } else {
           recommendation = { type: 'easy', reason: '이미 Long Run 완료, 회복 필요' };
         }
-      }
-      // Sub-T 부족 & 어제 쉬웠으면 Sub-T
-      else if (analysis.subTCount < 2 && !yesterdayWasHard) {
+      } else if (analysis.subTCount < 2 && !yesterdayWasHard) {
         const subTypes = ['sub-t-short', 'sub-t-medium', 'sub-t-long'];
         const subTypeIndex = analysis.subTCount % 3;
         recommendation = { 
           type: subTypes[subTypeIndex], 
           reason: `이번 주 Sub-T ${analysis.subTCount}/2-3회` 
         };
-      }
-      // Sub-T 2회 이상 & 어제 쉬웠으면 추가 Sub-T 가능
-      else if (analysis.subTCount >= 2 && analysis.subTCount < 3 && !yesterdayWasHard && today !== 0) {
+      } else if (analysis.subTCount >= 2 && analysis.subTCount < 3 && !yesterdayWasHard && today !== 0) {
         recommendation = { type: 'sub-t-medium', reason: '선택적 추가 Sub-T 세션' };
-      }
-      // 어제 힘들었으면 Easy
-      else if (yesterdayWasHard) {
+      } else if (yesterdayWasHard) {
         recommendation = { type: 'easy', reason: '회복일 - 어제 고강도 훈련' };
-      }
-      // 기본 Easy
-      else {
+      } else {
         recommendation = { type: 'easy', reason: '베이스 유지' };
       }
       
@@ -1609,27 +1872,95 @@
       };
     }
     
+    // 이번 주 계획 준수율 체크
+    function checkWeeklyCompliance() {
+      const analysis = analyzeThisWeek();
+      const issues = [];
+      
+      // 연속 고강도 체크
+      const days = Object.keys(analysis.byDay).map(Number).sort((a, b) => a - b);
+      for (let i = 1; i < days.length; i++) {
+        const prev = analysis.byDay[days[i - 1]];
+        const curr = analysis.byDay[days[i]];
+        if (days[i] === days[i - 1] + 1) { // 연속된 날
+          const prevHard = prev && (prev.type === 'sub-t' || prev.type === 'long');
+          const currHard = curr && (curr.type === 'sub-t' || curr.type === 'long');
+          if (prevHard && currHard) {
+            issues.push({
+              type: 'consecutive_hard',
+              message: `⚠️ ${dayNames[days[i - 1]]}요일과 ${dayNames[days[i]]}요일에 연속으로 고강도 훈련`,
+              severity: 'warning'
+            });
+          }
+        }
+      }
+      
+      // Sub-T 과다 체크
+      if (analysis.subTCount > 3) {
+        issues.push({
+          type: 'too_many_subt',
+          message: `⚠️ 이번 주 Sub-T ${analysis.subTCount}회 - 3회 이하 권장`,
+          severity: 'warning'
+        });
+      }
+      
+      // Long Run 누락 체크 (일요일 지났는데 없으면)
+      if (analysis.dayOfWeek > 0 && analysis.longCount === 0) {
+        // 아직 일요일 전이면 괜찮음
+      }
+      
+      return issues;
+    }
+    
     // 대시보드 오늘의 훈련 카드 업데이트
     function updateTodayRecommendCard() {
       const container = document.getElementById('todayRecommend');
       if (!container) return;
       
       const result = getTodayRecommendation();
+      const complianceIssues = checkWeeklyCompliance();
       const today = new Date();
       const dateStr = `${today.getMonth() + 1}월 ${today.getDate()}일 (${dayNames[today.getDay()]})`;
+      
+      let issuesHtml = '';
+      if (complianceIssues.length > 0) {
+        issuesHtml = `
+          <div style="margin-top: 12px; padding: 12px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 10px;">
+            ${complianceIssues.map(issue => `
+              <div style="font-size: 13px; color: #f87171; margin-bottom: 4px;">${issue.message}</div>
+            `).join('')}
+          </div>
+        `;
+      }
       
       if (result.type === 'completed') {
         const w = result.workout;
         const wType = workoutTypes[w.type] || workoutTypes['easy'];
+        
+        // 계획 불일치 알림
+        let mismatchHtml = '';
+        if (result.mismatch && result.mismatchMessage) {
+          mismatchHtml = `
+            <div style="margin-top: 12px; padding: 12px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px;">
+              <div style="font-size: 13px; color: #fbbf24;">${result.mismatchMessage}</div>
+              <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">원래 추천: ${result.expected.reason}</div>
+            </div>
+          `;
+        }
+        
         container.innerHTML = `
           <div style="display: flex; align-items: center; gap: 16px;">
-            <div style="width: 60px; height: 60px; border-radius: 16px; background: rgba(34,197,94,0.2); display: flex; align-items: center; justify-content: center; font-size: 28px;">✅</div>
+            <div style="width: 60px; height: 60px; border-radius: 16px; background: ${result.mismatch ? 'rgba(245,158,11,0.2)' : 'rgba(34,197,94,0.2)'}; display: flex; align-items: center; justify-content: center; font-size: 28px;">${result.mismatch ? '⚠️' : '✅'}</div>
             <div style="flex: 1;">
               <div style="font-size: 13px; color: #64748b;">${dateStr}</div>
-              <div style="font-size: 20px; font-weight: 700; color: #22c55e; margin: 4px 0;">훈련 완료!</div>
+              <div style="font-size: 20px; font-weight: 700; color: ${result.mismatch ? '#fbbf24' : '#22c55e'}; margin: 4px 0;">
+                ${result.mismatch ? '훈련 완료 (계획과 다름)' : '훈련 완료!'}
+              </div>
               <div style="font-size: 14px; color: #94a3b8;">${wType.icon} ${w.name} - ${w.distance}km, ${w.duration}분</div>
             </div>
           </div>
+          ${mismatchHtml}
+          ${issuesHtml}
         `;
       } else {
         const rec = result.recommendation;
@@ -1644,6 +1975,7 @@
               <div style="font-size: 12px; color: #64748b; margin-top: 4px;">💡 ${rec.reason}</div>
             </div>
           </div>
+          ${issuesHtml}
         `;
       }
     }

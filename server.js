@@ -198,13 +198,17 @@ app.get('/api/strava/activities', async (req, res) => {
       duration: Math.round(a.moving_time / 60),
       distance: (a.distance / 1000).toFixed(2),
       avgPace: formatPace(a.average_speed),
+      avgPaceSeconds: a.average_speed ? Math.round(1000 / a.average_speed) : null,
       avgHR: a.average_heartrate ? Math.round(a.average_heartrate) : null,
       maxHR: a.max_heartrate ? Math.round(a.max_heartrate) : null,
       calories: a.calories || null,
       elevationGain: a.total_elevation_gain || null,
       isTreadmill: a.type === 'VirtualRun',
       needsPaceCorrection: a.type === 'VirtualRun',
-      sufferScore: a.suffer_score || null
+      sufferScore: a.suffer_score || null,
+      // 사용자 수정 데이터 (세션에서 불러오기)
+      userCorrectedPace: req.session.corrections?.[a.id]?.pace || null,
+      userCorrectedIntervalPace: req.session.corrections?.[a.id]?.intervalPace || null
     }));
     
     res.json({ success: true, activities: formatted });
@@ -214,7 +218,7 @@ app.get('/api/strava/activities', async (req, res) => {
   }
 });
 
-// 활동 상세 정보
+// 활동 상세 정보 (랩 데이터 포함)
 app.get('/api/strava/activity/:id', async (req, res) => {
   const token = await refreshStravaToken(req.session);
   
@@ -236,11 +240,28 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     
     const activity = await response.json();
     
-    // 랩/스플릿 데이터 추출
+    // 랩 데이터 가져오기
+    const lapsResponse = await fetch(
+      `https://www.strava.com/api/v3/activities/${req.params.id}/laps`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+    
+    let laps = [];
+    if (lapsResponse.ok) {
+      laps = await lapsResponse.json();
+    }
+    
+    // 랩 분석 - 인터벌 vs 휴식 구분
+    const analyzedLaps = analyzeLaps(laps, activity);
+    
+    // 스플릿 데이터
     const splits = activity.splits_metric?.map((s, i) => ({
       lap: i + 1,
       distance: (s.distance / 1000).toFixed(2),
       pace: formatPace(s.average_speed),
+      paceSeconds: s.average_speed ? Math.round(1000 / s.average_speed) : null,
       avgHR: s.average_heartrate ? Math.round(s.average_heartrate) : null,
       elevation: s.elevation_difference
     })) || [];
@@ -248,14 +269,135 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     res.json({
       success: true,
       activity: {
-        ...activity,
-        splits
+        id: activity.id,
+        name: activity.name,
+        date: activity.start_date_local,
+        type: classifyType(activity),
+        duration: Math.round(activity.moving_time / 60),
+        distance: (activity.distance / 1000).toFixed(2),
+        avgPace: formatPace(activity.average_speed),
+        avgHR: activity.average_heartrate ? Math.round(activity.average_heartrate) : null,
+        maxHR: activity.max_heartrate ? Math.round(activity.max_heartrate) : null,
+        isTreadmill: activity.type === 'VirtualRun',
+        laps: analyzedLaps,
+        splits,
+        // 인터벌 구간 통계 (워밍업/쿨다운 제외)
+        intervalStats: calculateIntervalStats(analyzedLaps),
+        // 사용자 수정 데이터
+        userCorrections: req.session.corrections?.[activity.id] || null
       }
     });
   } catch (error) {
     console.error('활동 상세 조회 에러:', error);
     res.status(500).json({ error: '활동 상세 정보를 가져오는 중 오류가 발생했습니다.' });
   }
+});
+
+// 랩 분석 - 인터벌/휴식/워밍업/쿨다운 분류
+function analyzeLaps(laps, activity) {
+  if (!laps || laps.length === 0) return [];
+  
+  const avgPace = activity.average_speed ? 1000 / activity.average_speed : 0;
+  const avgHR = activity.average_heartrate || 0;
+  
+  return laps.map((lap, index) => {
+    const lapPace = lap.average_speed ? 1000 / lap.average_speed : 0;
+    const lapHR = lap.average_heartrate || 0;
+    const duration = Math.round(lap.moving_time / 60);
+    
+    // 분류 로직
+    let category = 'unknown';
+    
+    // 첫 번째 랩이고 페이스가 느리면 워밍업
+    if (index === 0 && lapPace > avgPace * 1.15) {
+      category = 'warmup';
+    }
+    // 마지막 랩이고 페이스가 느리면 쿨다운
+    else if (index === laps.length - 1 && lapPace > avgPace * 1.15) {
+      category = 'cooldown';
+    }
+    // HR 기준: 80% 미만이면 휴식
+    else if (avgHR > 0 && lapHR < avgHR * 0.85 && lapPace > avgPace * 1.2) {
+      category = 'recovery';
+    }
+    // 페이스가 평균보다 빠르고 HR이 높으면 인터벌
+    else if (lapPace <= avgPace * 1.05 || (lapHR >= avgHR * 0.95)) {
+      category = 'interval';
+    }
+    // 나머지는 휴식
+    else {
+      category = 'recovery';
+    }
+    
+    return {
+      index: index + 1,
+      name: lap.name || `Lap ${index + 1}`,
+      distance: (lap.distance / 1000).toFixed(2),
+      duration: duration,
+      pace: formatPace(lap.average_speed),
+      paceSeconds: Math.round(lapPace),
+      avgHR: lapHR ? Math.round(lapHR) : null,
+      maxHR: lap.max_heartrate ? Math.round(lap.max_heartrate) : null,
+      category: category
+    };
+  });
+}
+
+// 인터벌 구간만의 통계 계산
+function calculateIntervalStats(analyzedLaps) {
+  const intervals = analyzedLaps.filter(l => l.category === 'interval');
+  
+  if (intervals.length === 0) {
+    return null;
+  }
+  
+  const totalDistance = intervals.reduce((sum, l) => sum + parseFloat(l.distance), 0);
+  const totalDuration = intervals.reduce((sum, l) => sum + l.duration, 0);
+  const avgPaceSeconds = intervals.reduce((sum, l) => sum + l.paceSeconds, 0) / intervals.length;
+  const avgHRValues = intervals.filter(l => l.avgHR).map(l => l.avgHR);
+  const avgHR = avgHRValues.length > 0 
+    ? Math.round(avgHRValues.reduce((a, b) => a + b, 0) / avgHRValues.length)
+    : null;
+  
+  return {
+    count: intervals.length,
+    totalDistance: totalDistance.toFixed(2),
+    totalDuration: totalDuration,
+    avgPace: formatPace(1000 / avgPaceSeconds),
+    avgPaceSeconds: Math.round(avgPaceSeconds),
+    avgHR: avgHR,
+    laps: intervals
+  };
+}
+
+// 페이스 수정 저장
+app.post('/api/strava/activity/:id/correct', (req, res) => {
+  const { id } = req.params;
+  const { pace, intervalPace, intervals } = req.body;
+  
+  if (!req.session.corrections) {
+    req.session.corrections = {};
+  }
+  
+  req.session.corrections[id] = {
+    pace: pace || null,
+    intervalPace: intervalPace || null,
+    intervals: intervals || [],
+    updatedAt: new Date().toISOString()
+  };
+  
+  res.json({ success: true });
+});
+
+// 페이스 수정 삭제
+app.delete('/api/strava/activity/:id/correct', (req, res) => {
+  const { id } = req.params;
+  
+  if (req.session.corrections?.[id]) {
+    delete req.session.corrections[id];
+  }
+  
+  res.json({ success: true });
 });
 
 // ===== 헬퍼 함수 =====
