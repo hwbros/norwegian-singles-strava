@@ -1,7 +1,10 @@
 /**
- * Norwegian Singles Method - Strava API Integration
+ * Norwegian Singles Method - Strava API Integration (v2)
  * 
- * Strava 공식 OAuth API를 사용한 안정적인 연동
+ * 개선 사항:
+ * 1. 인터벌/휴식 구간 자동 분리 (HR 존 기반)
+ * 2. 트레드밀 페이스 수동 보정
+ * 3. 훈련 일정 불일치 감지
  */
 
 const express = require('express');
@@ -38,7 +41,6 @@ app.use(session({
 
 // ===== Strava OAuth =====
 
-// Strava 로그인 시작
 app.get('/api/strava/auth', (req, res) => {
   if (!STRAVA_CLIENT_ID) {
     return res.status(500).json({ error: 'Strava Client ID가 설정되지 않았습니다.' });
@@ -46,27 +48,19 @@ app.get('/api/strava/auth', (req, res) => {
   
   const redirectUri = `${BASE_URL}/api/strava/callback`;
   const scope = 'read,activity:read_all';
-  
   const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}`;
   
   res.redirect(authUrl);
 });
 
-// Strava OAuth 콜백
 app.get('/api/strava/callback', async (req, res) => {
   const { code, error } = req.query;
   
-  if (error) {
+  if (error || !code) {
     return res.redirect('/?error=access_denied');
   }
   
-  if (!code) {
-    return res.redirect('/?error=no_code');
-  }
-  
   try {
-    const redirectUri = `${BASE_URL}/api/strava/callback`;
-    
     const response = await fetch('https://www.strava.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -81,17 +75,15 @@ app.get('/api/strava/callback', async (req, res) => {
     const data = await response.json();
     
     if (data.access_token) {
-      // 세션에 저장
       req.session.strava = {
         accessToken: data.access_token,
         refreshToken: data.refresh_token,
         expiresAt: data.expires_at,
         athlete: data.athlete
       };
-      
+      req.session.corrections = req.session.corrections || {};
       res.redirect('/?connected=true');
     } else {
-      console.error('Strava 토큰 에러:', data);
       res.redirect('/?error=token_failed');
     }
   } catch (error) {
@@ -100,11 +92,9 @@ app.get('/api/strava/callback', async (req, res) => {
   }
 });
 
-// 토큰 갱신
 async function refreshStravaToken(session) {
   if (!session.strava?.refreshToken) return null;
   
-  // 만료 10분 전에 갱신
   if (session.strava.expiresAt > (Date.now() / 1000) + 600) {
     return session.strava.accessToken;
   }
@@ -136,22 +126,19 @@ async function refreshStravaToken(session) {
   return null;
 }
 
-// 로그인 상태 확인
 app.get('/api/strava/status', async (req, res) => {
   if (req.session.strava?.accessToken) {
     const token = await refreshStravaToken(req.session);
     if (token) {
-      res.json({ 
+      return res.json({ 
         loggedIn: true, 
         athlete: req.session.strava.athlete 
       });
-      return;
     }
   }
   res.json({ loggedIn: false });
 });
 
-// 로그아웃
 app.post('/api/strava/logout', (req, res) => {
   req.session.destroy();
   res.json({ success: true });
@@ -159,7 +146,6 @@ app.post('/api/strava/logout', (req, res) => {
 
 // ===== 활동 데이터 API =====
 
-// 활동 목록 가져오기
 app.get('/api/strava/activities', async (req, res) => {
   const token = await refreshStravaToken(req.session);
   
@@ -172,9 +158,7 @@ app.get('/api/strava/activities', async (req, res) => {
     
     const response = await fetch(
       `https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`,
-      {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }
+      { headers: { 'Authorization': `Bearer ${token}` } }
     );
     
     if (!response.ok) {
@@ -182,34 +166,41 @@ app.get('/api/strava/activities', async (req, res) => {
     }
     
     const activities = await response.json();
+    const corrections = req.session.corrections || {};
     
-    // 러닝 활동만 필터링
-    const runningActivities = activities.filter(a => 
-      a.type === 'Run' || a.type === 'VirtualRun' || a.type === 'TrailRun'
-    );
-    
-    // Norwegian Singles 형식으로 변환
-    const formatted = runningActivities.map(a => ({
-      id: a.id,
-      date: a.start_date_local.split('T')[0],
-      name: a.name,
-      type: classifyType(a),
-      subType: classifySubType(a),
-      duration: Math.round(a.moving_time / 60),
-      distance: (a.distance / 1000).toFixed(2),
-      avgPace: formatPace(a.average_speed),
-      avgPaceSeconds: a.average_speed ? Math.round(1000 / a.average_speed) : null,
-      avgHR: a.average_heartrate ? Math.round(a.average_heartrate) : null,
-      maxHR: a.max_heartrate ? Math.round(a.max_heartrate) : null,
-      calories: a.calories || null,
-      elevationGain: a.total_elevation_gain || null,
-      isTreadmill: a.type === 'VirtualRun',
-      needsPaceCorrection: a.type === 'VirtualRun',
-      sufferScore: a.suffer_score || null,
-      // 사용자 수정 데이터 (세션에서 불러오기)
-      userCorrectedPace: req.session.corrections?.[a.id]?.pace || null,
-      userCorrectedIntervalPace: req.session.corrections?.[a.id]?.intervalPace || null
-    }));
+    const formatted = activities
+      .filter(a => a.type === 'Run' || a.type === 'VirtualRun' || a.type === 'TrailRun')
+      .map(a => {
+        const correction = corrections[a.id] || {};
+        const isTreadmill = a.type === 'VirtualRun';
+        const autoType = classifyType(a);
+        
+        // 사용자가 수정한 분류가 있으면 우선 사용
+        const workoutType = correction.type || autoType;
+        const workoutSubType = correction.subType || classifySubType(a, workoutType);
+        
+        return {
+          id: a.id,
+          date: a.start_date_local.split('T')[0],
+          name: a.name,
+          type: workoutType,
+          autoType: autoType, // 자동 분류 결과도 함께 전달
+          subType: workoutSubType,
+          duration: Math.round(a.moving_time / 60),
+          distance: (a.distance / 1000).toFixed(2),
+          avgPace: formatPace(a.average_speed),
+          avgHR: a.average_heartrate ? Math.round(a.average_heartrate) : null,
+          maxHR: a.max_heartrate ? Math.round(a.max_heartrate) : null,
+          isTreadmill: isTreadmill,
+          needsPaceCorrection: isTreadmill && !correction.pace,
+          correctedPace: correction.pace || null,
+          intervalPace: correction.intervalPace || null,
+          intervalHR: correction.intervalHR || null,
+          hasUserCorrection: !!(correction.type || correction.pace || correction.intervalPace),
+          elevationGain: a.total_elevation_gain || null,
+          sufferScore: a.suffer_score || null
+        };
+      });
     
     res.json({ success: true, activities: formatted });
   } catch (error) {
@@ -218,7 +209,7 @@ app.get('/api/strava/activities', async (req, res) => {
   }
 });
 
-// 활동 상세 정보 (랩 데이터 포함)
+// 활동 상세 + 랩 분석
 app.get('/api/strava/activity/:id', async (req, res) => {
   const token = await refreshStravaToken(req.session);
   
@@ -227,44 +218,22 @@ app.get('/api/strava/activity/:id', async (req, res) => {
   }
   
   try {
-    const response = await fetch(
-      `https://www.strava.com/api/v3/activities/${req.params.id}?include_all_efforts=true`,
-      {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }
-    );
+    const [activityRes, lapsRes] = await Promise.all([
+      fetch(`https://www.strava.com/api/v3/activities/${req.params.id}`, 
+        { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(`https://www.strava.com/api/v3/activities/${req.params.id}/laps`, 
+        { headers: { 'Authorization': `Bearer ${token}` } })
+    ]);
     
-    if (!response.ok) {
-      throw new Error(`Strava API 에러: ${response.status}`);
+    if (!activityRes.ok) {
+      throw new Error(`Strava API 에러: ${activityRes.status}`);
     }
     
-    const activity = await response.json();
+    const activity = await activityRes.json();
+    const laps = lapsRes.ok ? await lapsRes.json() : [];
     
-    // 랩 데이터 가져오기
-    const lapsResponse = await fetch(
-      `https://www.strava.com/api/v3/activities/${req.params.id}/laps`,
-      {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }
-    );
-    
-    let laps = [];
-    if (lapsResponse.ok) {
-      laps = await lapsResponse.json();
-    }
-    
-    // 랩 분석 - 인터벌 vs 휴식 구분
-    const analyzedLaps = analyzeLaps(laps, activity);
-    
-    // 스플릿 데이터
-    const splits = activity.splits_metric?.map((s, i) => ({
-      lap: i + 1,
-      distance: (s.distance / 1000).toFixed(2),
-      pace: formatPace(s.average_speed),
-      paceSeconds: s.average_speed ? Math.round(1000 / s.average_speed) : null,
-      avgHR: s.average_heartrate ? Math.round(s.average_heartrate) : null,
-      elevation: s.elevation_difference
-    })) || [];
+    const analysis = analyzeLaps(laps, activity);
+    const correction = (req.session.corrections || {})[req.params.id] || {};
     
     res.json({
       success: true,
@@ -272,20 +241,18 @@ app.get('/api/strava/activity/:id', async (req, res) => {
         id: activity.id,
         name: activity.name,
         date: activity.start_date_local,
-        type: classifyType(activity),
+        type: correction.type || classifyType(activity),
         duration: Math.round(activity.moving_time / 60),
         distance: (activity.distance / 1000).toFixed(2),
         avgPace: formatPace(activity.average_speed),
         avgHR: activity.average_heartrate ? Math.round(activity.average_heartrate) : null,
         maxHR: activity.max_heartrate ? Math.round(activity.max_heartrate) : null,
-        isTreadmill: activity.type === 'VirtualRun',
-        laps: analyzedLaps,
-        splits,
-        // 인터벌 구간 통계 (워밍업/쿨다운 제외)
-        intervalStats: calculateIntervalStats(analyzedLaps),
-        // 사용자 수정 데이터
-        userCorrections: req.session.corrections?.[activity.id] || null
-      }
+        isTreadmill: activity.type === 'VirtualRun'
+      },
+      laps: analysis.laps,
+      intervalStats: analysis.intervalAnalysis,
+      intervalSets: analysis.intervalSets || [],
+      correction: correction
     });
   } catch (error) {
     console.error('활동 상세 조회 에러:', error);
@@ -293,155 +260,342 @@ app.get('/api/strava/activity/:id', async (req, res) => {
   }
 });
 
-// 랩 분석 - 인터벌/휴식/워밍업/쿨다운 분류
-function analyzeLaps(laps, activity) {
-  if (!laps || laps.length === 0) return [];
-  
-  const avgPace = activity.average_speed ? 1000 / activity.average_speed : 0;
-  const avgHR = activity.average_heartrate || 0;
-  
-  return laps.map((lap, index) => {
-    const lapPace = lap.average_speed ? 1000 / lap.average_speed : 0;
-    const lapHR = lap.average_heartrate || 0;
-    const duration = Math.round(lap.moving_time / 60);
-    
-    // 분류 로직
-    let category = 'unknown';
-    
-    // 첫 번째 랩이고 페이스가 느리면 워밍업
-    if (index === 0 && lapPace > avgPace * 1.15) {
-      category = 'warmup';
-    }
-    // 마지막 랩이고 페이스가 느리면 쿨다운
-    else if (index === laps.length - 1 && lapPace > avgPace * 1.15) {
-      category = 'cooldown';
-    }
-    // HR 기준: 80% 미만이면 휴식
-    else if (avgHR > 0 && lapHR < avgHR * 0.85 && lapPace > avgPace * 1.2) {
-      category = 'recovery';
-    }
-    // 페이스가 평균보다 빠르고 HR이 높으면 인터벌
-    else if (lapPace <= avgPace * 1.05 || (lapHR >= avgHR * 0.95)) {
-      category = 'interval';
-    }
-    // 나머지는 휴식
-    else {
-      category = 'recovery';
-    }
-    
-    return {
-      index: index + 1,
-      name: lap.name || `Lap ${index + 1}`,
-      distance: (lap.distance / 1000).toFixed(2),
-      duration: duration,
-      pace: formatPace(lap.average_speed),
-      paceSeconds: Math.round(lapPace),
-      avgHR: lapHR ? Math.round(lapHR) : null,
-      maxHR: lap.max_heartrate ? Math.round(lap.max_heartrate) : null,
-      category: category
-    };
-  });
-}
-
-// 인터벌 구간만의 통계 계산
-function calculateIntervalStats(analyzedLaps) {
-  const intervals = analyzedLaps.filter(l => l.category === 'interval');
-  
-  if (intervals.length === 0) {
-    return null;
-  }
-  
-  const totalDistance = intervals.reduce((sum, l) => sum + parseFloat(l.distance), 0);
-  const totalDuration = intervals.reduce((sum, l) => sum + l.duration, 0);
-  const avgPaceSeconds = intervals.reduce((sum, l) => sum + l.paceSeconds, 0) / intervals.length;
-  const avgHRValues = intervals.filter(l => l.avgHR).map(l => l.avgHR);
-  const avgHR = avgHRValues.length > 0 
-    ? Math.round(avgHRValues.reduce((a, b) => a + b, 0) / avgHRValues.length)
-    : null;
-  
-  return {
-    count: intervals.length,
-    totalDistance: totalDistance.toFixed(2),
-    totalDuration: totalDuration,
-    avgPace: formatPace(1000 / avgPaceSeconds),
-    avgPaceSeconds: Math.round(avgPaceSeconds),
-    avgHR: avgHR,
-    laps: intervals
-  };
-}
-
-// 페이스 수정 저장
-app.post('/api/strava/activity/:id/correct', (req, res) => {
+// 보정 데이터 저장 (분류, 페이스 등)
+app.post('/api/strava/activity/:id/correction', (req, res) => {
   const { id } = req.params;
-  const { pace, intervalPace, intervals } = req.body;
+  const { type, subType, pace, intervalPace, intervalHR } = req.body;
   
   if (!req.session.corrections) {
     req.session.corrections = {};
   }
   
+  // 기존 데이터와 병합
+  const existing = req.session.corrections[id] || {};
   req.session.corrections[id] = {
-    pace: pace || null,
-    intervalPace: intervalPace || null,
-    intervals: intervals || [],
+    ...existing,
+    type: type !== undefined ? type : existing.type,
+    subType: subType !== undefined ? subType : existing.subType,
+    pace: pace !== undefined ? pace : existing.pace,
+    intervalPace: intervalPace !== undefined ? intervalPace : existing.intervalPace,
+    intervalHR: intervalHR !== undefined ? (intervalHR ? parseInt(intervalHR) : null) : existing.intervalHR,
     updatedAt: new Date().toISOString()
   };
   
+  res.json({ success: true, correction: req.session.corrections[id] });
+});
+
+app.delete('/api/strava/activity/:id/correction', (req, res) => {
+  if (req.session.corrections) {
+    delete req.session.corrections[req.params.id];
+  }
   res.json({ success: true });
 });
 
-// 페이스 수정 삭제
-app.delete('/api/strava/activity/:id/correct', (req, res) => {
-  const { id } = req.params;
+// ===== 훈련 일정 API =====
+
+app.get('/api/schedule/recommended', (req, res) => {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
   
-  if (req.session.corrections?.[id]) {
-    delete req.session.corrections[id];
+  const weeklyPattern = {
+    0: { type: 'long', name: 'Long Run', desc: '90-120분 @ Easy 페이스' },
+    1: { type: 'easy', name: 'Easy Run', desc: '40-60분 회복' },
+    2: { type: 'sub-t', subType: 'short', name: 'Sub-T (짧은)', desc: '6×1000m (60초 휴식)' },
+    3: { type: 'easy', name: 'Easy Run', desc: '40-60분 회복' },
+    4: { type: 'sub-t', subType: 'medium', name: 'Sub-T (중간)', desc: '4×2000m (75초 휴식)' },
+    5: { type: 'easy', name: 'Easy Run', desc: '40-60분 회복' },
+    6: { type: 'sub-t', subType: 'long', name: 'Sub-T (긴)', desc: '3×10분 (90초 휴식)' }
+  };
+  
+  res.json({
+    success: true,
+    today: weeklyPattern[dayOfWeek],
+    week: weeklyPattern
+  });
+});
+
+app.get('/api/schedule/analysis', async (req, res) => {
+  const token = await refreshStravaToken(req.session);
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Strava에 연결해주세요.' });
   }
   
-  res.json({ success: true });
+  try {
+    const response = await fetch(
+      `https://www.strava.com/api/v3/athlete/activities?per_page=14`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    
+    const activities = await response.json();
+    
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    
+    const weeklyPattern = {
+      0: 'long', 1: 'easy', 2: 'sub-t', 3: 'easy', 4: 'sub-t', 5: 'easy', 6: 'sub-t'
+    };
+    
+    const mismatches = [];
+    
+    activities
+      .filter(a => a.type === 'Run' || a.type === 'VirtualRun' || a.type === 'TrailRun')
+      .forEach(a => {
+        const activityDate = new Date(a.start_date_local);
+        if (activityDate >= startOfWeek && activityDate <= today) {
+          const dayOfWeek = activityDate.getDay();
+          const recommended = weeklyPattern[dayOfWeek];
+          const actual = classifyType(a);
+          
+          if (recommended !== actual) {
+            mismatches.push({
+              date: a.start_date_local.split('T')[0],
+              dayOfWeek: dayOfWeek,
+              dayName: ['일', '월', '화', '수', '목', '금', '토'][dayOfWeek],
+              recommended: recommended,
+              actual: actual,
+              activityName: a.name,
+              activityId: a.id
+            });
+          }
+        }
+      });
+    
+    res.json({
+      success: true,
+      mismatches: mismatches,
+      hasMismatches: mismatches.length > 0
+    });
+  } catch (error) {
+    console.error('일정 분석 에러:', error);
+    res.status(500).json({ error: '일정 분석 중 오류가 발생했습니다.' });
+  }
 });
 
 // ===== 헬퍼 함수 =====
 
+function analyzeLaps(laps, activity) {
+  if (!laps || laps.length === 0) {
+    return { laps: [], intervalAnalysis: null, intervalSets: [] };
+  }
+  
+  const userMaxHR = 190; // 사용자 최대 심박수
+  const allPaces = laps.map(l => l.average_speed > 0 ? 1000 / l.average_speed : 999);
+  const medianPace = allPaces.sort((a, b) => a - b)[Math.floor(allPaces.length / 2)];
+  
+  const analyzedLaps = laps.map((lap, index) => {
+    const avgHR = lap.average_heartrate || 0;
+    const hrPercent = userMaxHR > 0 ? (avgHR / userMaxHR) * 100 : 0;
+    const pace = lap.average_speed > 0 ? 1000 / lap.average_speed : 999;
+    
+    let lapType = 'unknown';
+    
+    // 매우 느린 페이스 (8분/km 이상) → 휴식
+    if (pace > 480) {
+      lapType = 'rest';
+    }
+    // 첫 번째 랩이고 HR이 낮으면 워밍업
+    else if (index === 0 && hrPercent < 75) {
+      lapType = 'warmup';
+    }
+    // 마지막 랩이고 HR이 낮으면 쿨다운
+    else if (index === laps.length - 1 && hrPercent < 75) {
+      lapType = 'cooldown';
+    }
+    // 페이스가 중간값보다 40% 이상 느리면 휴식
+    else if (pace > medianPace * 1.4) {
+      lapType = 'rest';
+    }
+    // HR 75% 이상이고 페이스가 적당하면 인터벌
+    else if (hrPercent >= 75 && pace < medianPace * 1.2) {
+      lapType = 'interval';
+    }
+    // HR 70-75%면 이지
+    else if (hrPercent >= 70 && hrPercent < 75) {
+      lapType = 'easy';
+    }
+    // HR 70% 미만이면 워밍업
+    else if (hrPercent < 70) {
+      lapType = 'warmup';
+    }
+    // 그 외 HR 높으면 인터벌
+    else if (hrPercent >= 75) {
+      lapType = 'interval';
+    }
+    else {
+      lapType = 'easy';
+    }
+    
+    return {
+      lap: index + 1,
+      distance: (lap.distance / 1000).toFixed(2),
+      distanceMeters: lap.distance,
+      duration: Math.round(lap.moving_time / 60 * 10) / 10,
+      durationSeconds: lap.moving_time,
+      pace: formatPaceFromSeconds(pace),
+      paceSeconds: Math.round(pace),
+      avgHR: avgHR ? Math.round(avgHR) : null,
+      hrPercent: Math.round(hrPercent),
+      type: lapType
+    };
+  });
+  
+  // === 연속 인터벌 랩을 "인터벌 세트"로 합치기 ===
+  const intervalSets = [];
+  let currentSet = null;
+  
+  analyzedLaps.forEach((lap, index) => {
+    if (lap.type === 'interval') {
+      if (!currentSet) {
+        // 새로운 인터벌 세트 시작
+        currentSet = {
+          startLap: lap.lap,
+          endLap: lap.lap,
+          laps: [lap],
+          totalDistance: parseFloat(lap.distance),
+          totalDistanceMeters: lap.distanceMeters,
+          totalDuration: lap.duration,
+          totalDurationSeconds: lap.durationSeconds,
+          paceSum: lap.paceSeconds,
+          hrSum: lap.avgHR || 0,
+          hrCount: lap.avgHR ? 1 : 0
+        };
+      } else {
+        // 기존 세트에 추가
+        currentSet.endLap = lap.lap;
+        currentSet.laps.push(lap);
+        currentSet.totalDistance += parseFloat(lap.distance);
+        currentSet.totalDistanceMeters += lap.distanceMeters;
+        currentSet.totalDuration += lap.duration;
+        currentSet.totalDurationSeconds += lap.durationSeconds;
+        currentSet.paceSum += lap.paceSeconds;
+        if (lap.avgHR) {
+          currentSet.hrSum += lap.avgHR;
+          currentSet.hrCount++;
+        }
+      }
+    } else {
+      // 인터벌이 아닌 랩 → 현재 세트 종료
+      if (currentSet) {
+        // 세트 통계 계산
+        const lapCount = currentSet.laps.length;
+        currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / (currentSet.totalDistanceMeters / 1000);
+        currentSet.avgPace = formatPaceFromSeconds(currentSet.avgPaceSeconds);
+        currentSet.avgHR = currentSet.hrCount > 0 ? Math.round(currentSet.hrSum / currentSet.hrCount) : null;
+        currentSet.totalDistance = currentSet.totalDistance.toFixed(2);
+        currentSet.lapCount = lapCount;
+        intervalSets.push(currentSet);
+        currentSet = null;
+      }
+    }
+  });
+  
+  // 마지막 세트 처리
+  if (currentSet) {
+    const lapCount = currentSet.laps.length;
+    currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / (currentSet.totalDistanceMeters / 1000);
+    currentSet.avgPace = formatPaceFromSeconds(currentSet.avgPaceSeconds);
+    currentSet.avgHR = currentSet.hrCount > 0 ? Math.round(currentSet.hrSum / currentSet.hrCount) : null;
+    currentSet.totalDistance = currentSet.totalDistance.toFixed(2);
+    currentSet.lapCount = lapCount;
+    intervalSets.push(currentSet);
+  }
+  
+  // 인터벌 세트 기반 분석
+  let intervalAnalysis = null;
+  if (intervalSets.length > 0) {
+    const totalDistance = intervalSets.reduce((sum, s) => sum + parseFloat(s.totalDistance), 0);
+    const totalDurationSeconds = intervalSets.reduce((sum, s) => sum + s.totalDurationSeconds, 0);
+    const avgPaceSeconds = totalDurationSeconds / totalDistance;
+    const validHRSets = intervalSets.filter(s => s.avgHR);
+    const avgHR = validHRSets.length > 0
+      ? Math.round(validHRSets.reduce((sum, s) => sum + s.avgHR, 0) / validHRSets.length)
+      : null;
+    
+    intervalAnalysis = {
+      count: intervalSets.length, // 인터벌 세트 수
+      avgPace: formatPaceFromSeconds(avgPaceSeconds),
+      avgPaceSeconds: Math.round(avgPaceSeconds),
+      avgHR: avgHR,
+      totalDistance: totalDistance.toFixed(2),
+      sets: intervalSets // 각 인터벌 세트 상세
+    };
+  }
+  
+  return { laps: analyzedLaps, intervalAnalysis, intervalSets };
+}
+
 function classifyType(a) {
   const duration = a.moving_time / 60;
   const avgHR = a.average_heartrate;
-  const maxHR = a.max_heartrate || 190;
-  const hrPercent = avgHR ? (avgHR / maxHR) * 100 : 0;
+  const pace = a.average_speed ? 1000 / a.average_speed : 0; // 초/km
   
-  // 롱런 (85분 이상)
+  // 사용자 MaxHR - 고정값 190 사용 (운동의 max_heartrate가 아님!)
+  const userMaxHR = 190;
+  const hrPercent = avgHR ? (avgHR / userMaxHR) * 100 : 0;
+  
+  // 0. 매우 짧은 활동 (15분 미만) → 워밍업/쿨다운으로 간주
+  //    Sub-T 분석에서 제외됨
+  if (duration < 15) {
+    return 'warmup-cooldown';
+  }
+  
+  // 1. 롱런 (85분 이상)
   if (duration >= 85) return 'long';
   
-  // 이지런 (HR < 72%)
+  // 2. Easy Run 판단 - 여러 조건 중 하나라도 충족하면 Easy
+  //    - 절대 HR: 평균 HR < 145bpm (낮은 절대값)
+  //    - 상대 HR: HR < 72% MaxHR
+  //    - 복합: HR < 75% & 페이스 > 5:30/km
+  if (avgHR && avgHR < 145) return 'easy';
   if (hrPercent > 0 && hrPercent < 72) return 'easy';
+  if (hrPercent > 0 && hrPercent < 75 && pace > 330) return 'easy';
   
-  // 이름으로 판단
+  // 3. 짧은 활동 (25분 미만) + HR 낮음 → Easy (워밍업성 조깅)
+  if (duration < 25 && avgHR && avgHR < 155) return 'easy';
+  
+  // 4. 이름 기반 판단 (단, HR이 너무 낮으면 무시)
   const name = (a.name || '').toLowerCase();
-  if (name.includes('interval') || name.includes('tempo') || 
+  const hasSubTKeywords = name.includes('interval') || name.includes('tempo') || 
       name.includes('threshold') || name.includes('sub-t') ||
       name.includes('workout') || name.includes('quality') ||
-      name.includes('인터벌') || name.includes('템포')) {
+      name.includes('인터벌') || name.includes('템포') ||
+      name.includes('sub') || name.includes('서브');
+  
+  if (hasSubTKeywords) {
+    // 키워드가 있어도 HR이 낮으면 Easy (잘못된 이름 또는 쉬운 세션)
+    if (avgHR && avgHR < 150) return 'easy';
+    if (hrPercent > 0 && hrPercent < 75) return 'easy';
     return 'sub-t';
   }
   
-  // HR 기반 판단
-  if (hrPercent >= 75 && hrPercent <= 90) {
-    return 'sub-t';
+  // 5. HR 기반 Sub-T (78-90%)
+  if (hrPercent >= 78 && hrPercent <= 90) return 'sub-t';
+  
+  // 6. HR 정보 없으면 페이스로 판단
+  if (!avgHR) {
+    if (pace > 360) return 'easy'; // 6:00/km보다 느림
+    if (pace < 330 && duration >= 40) return 'sub-t'; // 빠르고 길면 Sub-T
+    return 'easy';
   }
   
-  // 기본값
-  if (hrPercent >= 72) return 'sub-t';
-  return 'easy';
+  // 7. 기본값: HR 75% 미만이면 Easy
+  if (hrPercent < 75) return 'easy';
+  
+  return 'sub-t';
 }
 
-function classifySubType(a) {
-  if (classifyType(a) !== 'sub-t') return null;
+function classifySubType(a, type) {
+  if (type !== 'sub-t') return null;
   
   const name = (a.name || '').toLowerCase();
   const duration = a.moving_time / 60;
   
   if (name.includes('1000') || name.includes('1k') || name.includes('short') || name.includes('짧은')) return 'short';
   if (name.includes('2000') || name.includes('2k') || name.includes('medium') || name.includes('중간')) return 'medium';
-  if (name.includes('10min') || name.includes('long') || name.includes('cruise') || name.includes('긴')) return 'long';
+  if (name.includes('10min') || name.includes('10분') || name.includes('long') || name.includes('긴')) return 'long';
   
   if (duration < 40) return 'short';
   if (duration < 55) return 'medium';
@@ -451,8 +605,13 @@ function classifySubType(a) {
 function formatPace(speedMps) {
   if (!speedMps || speedMps === 0) return 'N/A';
   const pace = 1000 / speedMps;
-  const min = Math.floor(pace / 60);
-  const sec = Math.round(pace % 60);
+  return formatPaceFromSeconds(pace);
+}
+
+function formatPaceFromSeconds(seconds) {
+  if (!seconds || seconds === 0 || seconds > 900) return 'N/A';
+  const min = Math.floor(seconds / 60);
+  const sec = Math.round(seconds % 60);
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
@@ -466,17 +625,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ===== 서버 시작 =====
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Norwegian Singles Method - Strava Integration          ║
+║     Norwegian Singles Method - Strava Integration v2       ║
 ╠════════════════════════════════════════════════════════════╣
-║  Server running on port ${PORT}                               ║
-║  BASE_URL: ${BASE_URL}
-║                                                            ║
-║  Strava Client ID: ${STRAVA_CLIENT_ID ? '설정됨 ✓' : '미설정 ✗'}
+║  Server: http://localhost:${PORT}                             ║
+║  Strava Client ID: ${STRAVA_CLIENT_ID ? '✓ 설정됨' : '✗ 미설정'}
 ╚════════════════════════════════════════════════════════════╝
   `);
 });

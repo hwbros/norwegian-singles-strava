@@ -141,9 +141,13 @@
     .badge-sub-t { background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
     .badge-easy { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
     .badge-long { background: rgba(139,92,246,0.2); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+    .badge-warmup { background: rgba(100,116,139,0.2); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); }
     .badge-treadmill { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
     .badge-warning { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
     .badge-success { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    
+    /* 워밍업/쿨다운 활동 카드 스타일 */
+    .workout-card.warmup-cooldown { opacity: 0.6; }
     
     .workout-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 16px; }
     @media (max-width: 768px) { .workout-stats { grid-template-columns: repeat(3, 1fr); } }
@@ -360,6 +364,14 @@
 
         <div id="statsGrid" class="stats-grid">
           <!-- Stats will be loaded here -->
+        </div>
+
+        <!-- 일정 불일치 알림 -->
+        <div id="scheduleMismatchCard" class="card hidden" style="background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3);">
+          <div class="card-title" style="color: #f87171;">⚠️ 훈련 일정 불일치</div>
+          <div id="scheduleMismatchContent">
+            <!-- 불일치 내용 -->
+          </div>
         </div>
 
         <div class="grid-2">
@@ -872,6 +884,8 @@
     let workouts = [];
     let userInfo = null;
     let editingWorkout = null;
+    let selectedActivity = null;
+    let loadingActivity = null;
 
     // ===== Authentication (Strava OAuth) =====
     
@@ -967,6 +981,7 @@
           updatePredictedRaceTimes();
           updateTrainingRecommendations();
           updateTodayRecommendCard();
+          checkScheduleMismatch(); // 일정 불일치 체크 추가
         } else {
           workoutsList.innerHTML = `
             <div class="feedback-card feedback-danger">
@@ -1017,30 +1032,40 @@
       workouts.forEach(w => {
         const isExpanded = selectedActivity?.id === w.id;
         const isLoading = loadingActivity === w.id;
+        const isWarmupCooldown = w.type === 'warmup-cooldown';
         
         // 수정된 페이스가 있으면 표시
-        const displayPace = w.userCorrectedIntervalPace || w.userCorrectedPace || w.avgPace;
-        const hasCorrection = w.userCorrectedPace || w.userCorrectedIntervalPace;
+        const displayPace = w.intervalPace || w.correctedPace || w.avgPace;
+        const hasCorrection = w.hasUserCorrection || w.correctedPace || w.intervalPace;
+        const typeWasChanged = w.autoType && w.type !== w.autoType;
+        
+        // 아이콘 결정
+        const typeIcon = w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : isWarmupCooldown ? '🔄' : '🚶';
+        
+        // 배지 클래스와 텍스트
+        const badgeClass = w.type === 'sub-t' ? 'badge-sub-t' : w.type === 'long' ? 'badge-long' : isWarmupCooldown ? 'badge-warmup' : 'badge-easy';
+        const badgeText = w.type === 'sub-t' ? 'Sub-T' : w.type === 'long' ? 'Long Run' : isWarmupCooldown ? '워밍업/쿨다운' : 'Easy';
         
         html += `
-          <div class="workout-card ${isExpanded ? 'expanded' : ''}">
+          <div class="workout-card ${isExpanded ? 'expanded' : ''} ${isWarmupCooldown ? 'warmup-cooldown' : ''}">
             <div class="workout-header">
               <div style="flex: 1;">
                 <div class="workout-title">
-                  ${w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : '🚶'} ${w.name}
+                  ${typeIcon} ${w.name}
                 </div>
                 <div class="workout-date">${w.date}</div>
                 <div class="workout-badges">
-                  <span class="badge ${w.type === 'sub-t' ? 'badge-sub-t' : w.type === 'long' ? 'badge-long' : 'badge-easy'}">
-                    ${w.type === 'sub-t' ? 'Sub-T' : w.type === 'long' ? 'Long Run' : 'Easy'}
+                  <span class="badge ${badgeClass}" style="cursor: pointer;" onclick="openTypeModal(${w.id})" title="클릭하여 분류 변경">
+                    ${badgeText} ${typeWasChanged ? '✏️' : '▼'}
                   </span>
-                  ${w.subType ? `<span class="badge badge-sub-t">${w.subType === 'short' ? '짧은 인터벌' : w.subType === 'medium' ? '중간 인터벌' : '긴 인터벌'}</span>` : ''}
+                  ${w.subType && w.type === 'sub-t' ? `<span class="badge badge-sub-t">${w.subType === 'short' ? '짧은 인터벌' : w.subType === 'medium' ? '중간 인터벌' : '긴 인터벌'}</span>` : ''}
                   ${w.isTreadmill ? '<span class="badge badge-treadmill">🏃‍♂️ Treadmill</span>' : ''}
-                  ${w.needsPaceCorrection && !hasCorrection ? '<span class="badge badge-warning">⚠️ 페이스 수정 필요</span>' : ''}
-                  ${hasCorrection ? '<span class="badge badge-success">✅ 수정됨</span>' : ''}
+                  ${w.correctedPace ? '<span class="badge badge-success">✅ 페이스 수정됨</span>' : ''}
+                  ${typeWasChanged ? '<span class="badge badge-success">✅ 분류 수정됨</span>' : ''}
+                  ${isWarmupCooldown && !typeWasChanged ? '<span class="badge badge-warning" style="font-size: 11px;">분석 제외</span>' : ''}
                 </div>
               </div>
-              <div style="display: flex; gap: 8px;">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 ${w.type === 'sub-t' ? `
                   <button class="btn btn-secondary" style="padding: 8px 12px; font-size: 13px;" onclick="toggleActivityDetail(${w.id})">
                     ${isLoading ? '⏳' : isExpanded ? '▲ 접기' : '▼ 인터벌 분석'}
@@ -1065,7 +1090,7 @@
               </div>
               <div class="workout-stat">
                 <div class="workout-stat-label">평균 페이스</div>
-                <div class="workout-stat-value ${hasCorrection ? 'corrected' : ''}">${displayPace}/km</div>
+                <div class="workout-stat-value ${w.correctedPace ? 'corrected' : ''}">${displayPace}/km</div>
               </div>
               <div class="workout-stat">
                 <div class="workout-stat-label">평균 HR</div>
@@ -1082,6 +1107,8 @@
             </div>
             
             ${isExpanded && selectedActivity ? renderActivityDetail(selectedActivity) : ''}
+          </div>
+        `;
           </div>
         `;
       });
@@ -1107,7 +1134,13 @@
         const data = await response.json();
         
         if (data.success) {
-          selectedActivity = data.activity;
+          selectedActivity = {
+            ...data.activity,
+            intervalStats: data.intervalStats,
+            intervalSets: data.intervalSets || [],
+            laps: data.laps,
+            correction: data.correction
+          };
         }
       } catch (error) {
         console.error('활동 상세 조회 실패:', error);
@@ -1121,21 +1154,22 @@
     function renderActivityDetail(activity) {
       const stats = activity.intervalStats;
       const laps = activity.laps || [];
+      const intervalSets = activity.intervalSets || [];
       
       let html = `<div class="activity-detail" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(100,116,139,0.3);">`;
       
-      // 인터벌 통계 (워밍업/쿨다운 제외)
-      if (stats) {
+      // 인터벌 세트 통계 (연속 인터벌을 합친 결과)
+      if (stats && stats.count > 0) {
         html += `
           <div style="margin-bottom: 16px; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
-            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 12px;">🎯 인터벌 구간만의 통계 (워밍업/쿨다운 제외)</div>
+            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 12px;">🎯 인터벌 세트 통계 (연속 구간 합산)</div>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; text-align: center;">
               <div>
-                <div style="font-size: 12px; color: #64748b;">인터벌 수</div>
+                <div style="font-size: 12px; color: #64748b;">인터벌 세트</div>
                 <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.count}개</div>
               </div>
               <div>
-                <div style="font-size: 12px; color: #64748b;">인터벌 거리</div>
+                <div style="font-size: 12px; color: #64748b;">총 인터벌 거리</div>
                 <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.totalDistance}km</div>
               </div>
               <div>
@@ -1149,39 +1183,84 @@
             </div>
           </div>
         `;
+        
+        // 인터벌 세트 상세
+        if (intervalSets.length > 0) {
+          html += `
+            <div style="margin-bottom: 16px;">
+              <div style="font-weight: 600; margin-bottom: 12px;">⚡ 인터벌 세트 상세</div>
+              <div style="display: grid; gap: 8px;">
+          `;
+          
+          intervalSets.forEach((set, idx) => {
+            html += `
+              <div style="padding: 12px 16px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); border-radius: 10px; box-shadow: 0 0 8px rgba(245,158,11,0.2);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div style="font-weight: 600; color: #fbbf24;">🔥 인터벌 #${idx + 1}</div>
+                  <div style="font-size: 12px; color: #94a3b8;">랩 ${set.startLap}${set.startLap !== set.endLap ? '-' + set.endLap : ''} (${set.lapCount}개 랩 합산)</div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 14px;">
+                  <div><span style="color: #64748b;">거리:</span> <strong style="color: #fbbf24;">${set.totalDistance}km</strong></div>
+                  <div><span style="color: #64748b;">시간:</span> <strong>${Math.round(set.totalDuration)}분</strong></div>
+                  <div><span style="color: #64748b;">평균 페이스:</span> <strong style="color: #fbbf24;">${set.avgPace}/km</strong></div>
+                  <div><span style="color: #64748b;">평균 HR:</span> <strong>${set.avgHR || '-'}bpm</strong></div>
+                </div>
+              </div>
+            `;
+          });
+          
+          html += `</div></div>`;
+        }
+        
+        html += `
+          <div style="margin-bottom: 16px; padding: 10px; background: rgba(34,197,94,0.1); border-radius: 8px; font-size: 13px; color: #94a3b8;">
+            💡 Strava가 1km마다 자동으로 랩을 나누기 때문에, 연속된 인터벌 구간을 자동으로 합쳐서 실제 인터벌 세트 수를 계산합니다.
+          </div>
+        `;
+      } else {
+        html += `
+          <div style="margin-bottom: 16px; padding: 16px; background: rgba(239,68,68,0.1); border-radius: 12px; border: 1px solid rgba(239,68,68,0.2);">
+            <div style="color: #f87171;">⚠️ 인터벌 구간을 자동으로 감지하지 못했습니다. HR 데이터가 있는지 확인하세요.</div>
+          </div>
+        `;
       }
       
-      // 랩 상세
+      // 전체 랩 상세 (접기/펴기)
       if (laps.length > 0) {
         html += `
-          <div style="font-weight: 600; margin-bottom: 12px;">📋 랩 분석</div>
-          <div style="display: grid; gap: 8px;">
+          <details style="margin-top: 16px;">
+            <summary style="font-weight: 600; cursor: pointer; padding: 8px 0; color: #94a3b8;">📋 전체 랩 상세 보기 (${laps.length}개 랩)</summary>
+            <div style="display: grid; gap: 8px; margin-top: 12px;">
         `;
         
         laps.forEach(lap => {
           const categoryColors = {
             'warmup': { bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.3)', text: '#60a5fa', label: '🔥 워밍업' },
             'cooldown': { bg: 'rgba(139,92,246,0.1)', border: 'rgba(139,92,246,0.3)', text: '#a78bfa', label: '❄️ 쿨다운' },
-            'interval': { bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)', text: '#fbbf24', label: '⚡ 인터벌' },
-            'recovery': { bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.3)', text: '#22c55e', label: '🚶 휴식' },
-            'unknown': { bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.3)', text: '#94a3b8', label: '?' }
+            'interval': { bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.4)', text: '#fbbf24', label: '⚡ 인터벌' },
+            'rest': { bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.3)', text: '#22c55e', label: '🚶 휴식' },
+            'easy': { bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.3)', text: '#22c55e', label: '🚶 이지' },
+            'hard': { bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.3)', text: '#f87171', label: '🔴 과속' },
+            'unknown': { bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.3)', text: '#94a3b8', label: '❓' }
           };
-          const cat = categoryColors[lap.category] || categoryColors.unknown;
+          const cat = categoryColors[lap.type] || categoryColors.unknown;
+          const isInterval = lap.type === 'interval';
           
           html += `
-            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 8px;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 8px; ${isInterval ? 'box-shadow: 0 0 8px rgba(245,158,11,0.2);' : ''}">
+              <div style="min-width: 24px; font-size: 13px; color: #64748b;">#${lap.lap}</div>
               <div style="width: 80px; font-size: 12px; color: ${cat.text}; font-weight: 600;">${cat.label}</div>
               <div style="flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 13px;">
                 <div><span style="color: #64748b;">거리:</span> ${lap.distance}km</div>
                 <div><span style="color: #64748b;">시간:</span> ${lap.duration}분</div>
-                <div><span style="color: #64748b;">페이스:</span> <strong>${lap.pace}</strong>/km</div>
-                <div><span style="color: #64748b;">HR:</span> ${lap.avgHR || '-'}bpm</div>
+                <div><span style="color: #64748b;">페이스:</span> <strong style="color: ${isInterval ? '#fbbf24' : 'inherit'}">${lap.pace}</strong>/km</div>
+                <div><span style="color: #64748b;">HR:</span> ${lap.avgHR || '-'}bpm ${lap.hrPercent ? `(${lap.hrPercent}%)` : ''}</div>
               </div>
             </div>
           `;
         });
         
-        html += `</div>`;
+        html += `</div></details>`;
       }
       
       html += `</div>`;
@@ -1206,7 +1285,7 @@
           <div class="form-group">
             <label>전체 평균 페이스</label>
             <input type="text" class="form-input" id="correctedPace" 
-              value="${workout.userCorrectedPace || workout.avgPace}" 
+              value="${workout.correctedPace || workout.avgPace}" 
               placeholder="5:30">
             <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
               Strava 기록: ${workout.avgPace}/km
@@ -1217,11 +1296,17 @@
             <div class="form-group" style="margin-top: 16px;">
               <label>인터벌 구간 평균 페이스 (선택)</label>
               <input type="text" class="form-input" id="correctedIntervalPace" 
-                value="${workout.userCorrectedIntervalPace || ''}" 
+                value="${workout.intervalPace || ''}" 
                 placeholder="5:00">
               <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
                 워밍업/휴식 제외한 실제 인터벌 페이스
               </div>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+              <label>인터벌 구간 평균 HR (선택)</label>
+              <input type="number" class="form-input" id="correctedIntervalHR" 
+                value="${workout.intervalHR || ''}" 
+                placeholder="160">
             </div>
           ` : ''}
           
@@ -1234,7 +1319,7 @@
             </button>
           </div>
           
-          ${workout.userCorrectedPace ? `
+          ${workout.correctedPace ? `
             <button class="btn btn-danger" style="width: 100%; margin-top: 12px;" onclick="clearPaceCorrection(${id})">
               수정 초기화
             </button>
@@ -1253,21 +1338,25 @@
     async function savePaceCorrection(id) {
       const pace = document.getElementById('correctedPace')?.value;
       const intervalPace = document.getElementById('correctedIntervalPace')?.value;
+      const intervalHR = document.getElementById('correctedIntervalHR')?.value;
       
       try {
-        await fetch(`${API_BASE}/api/strava/activity/${id}/correct`, {
+        const response = await fetch(`${API_BASE}/api/strava/activity/${id}/correction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ pace, intervalPace })
+          body: JSON.stringify({ pace, intervalPace, intervalHR })
         });
         
-        // 로컬 데이터 업데이트
-        const workout = workouts.find(w => w.id === id);
-        if (workout) {
-          workout.userCorrectedPace = pace;
-          workout.userCorrectedIntervalPace = intervalPace;
-          workout.needsPaceCorrection = false;
+        if (response.ok) {
+          // 로컬 데이터 업데이트
+          const workout = workouts.find(w => w.id === id);
+          if (workout) {
+            workout.correctedPace = pace;
+            workout.intervalPace = intervalPace;
+            workout.intervalHR = intervalHR ? parseInt(intervalHR) : null;
+            workout.needsPaceCorrection = false;
+          }
         }
         
         closePaceModal();
@@ -1280,34 +1369,184 @@
     
     async function clearPaceCorrection(id) {
       try {
-        await fetch(`${API_BASE}/api/strava/activity/${id}/correct`, {
+        await fetch(`${API_BASE}/api/strava/activity/${id}/correction`, {
           method: 'DELETE',
           credentials: 'include'
         });
         
         const workout = workouts.find(w => w.id === id);
         if (workout) {
-          workout.userCorrectedPace = null;
-          workout.userCorrectedIntervalPace = null;
+          workout.correctedPace = null;
+          workout.intervalPace = null;
+          workout.intervalHR = null;
           workout.needsPaceCorrection = workout.isTreadmill;
+          workout.type = workout.autoType; // 자동 분류로 복원
+          workout.hasUserCorrection = false;
         }
         
         closePaceModal();
         renderWorkouts();
+        updateDashboard();
       } catch (error) {
         console.error('페이스 수정 초기화 실패:', error);
       }
     }
     
-    function updateDashboard() {
-      // Count workout types
-      const subTCount = workouts.filter(w => w.type === 'sub-t').length;
-      const easyCount = workouts.filter(w => w.type === 'easy').length;
-      const longCount = workouts.filter(w => w.type === 'long').length;
+    // === 훈련 분류 변경 모달 ===
+    function openTypeModal(id) {
+      const workout = workouts.find(w => w.id === id);
+      if (!workout) return;
       
-      // Calculate quality volume
-      const totalTime = workouts.reduce((sum, w) => sum + w.duration, 0);
-      const qualityTime = workouts.filter(w => w.type === 'sub-t')
+      const types = [
+        { value: 'sub-t', label: '🔥 Sub-T (인터벌)', desc: 'Sub-threshold 인터벌 훈련' },
+        { value: 'easy', label: '🚶 Easy Run', desc: '편안한 회복 달리기' },
+        { value: 'long', label: '🏃 Long Run', desc: '장거리 지구력 훈련' },
+        { value: 'warmup-cooldown', label: '🔄 워밍업/쿨다운', desc: '분석에서 제외됨' }
+      ];
+      
+      const subTypes = [
+        { value: 'short', label: '짧은 인터벌 (1000m)' },
+        { value: 'medium', label: '중간 인터벌 (2000m)' },
+        { value: 'long', label: '긴 인터벌 (10분)' }
+      ];
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.id = 'typeModal';
+      modal.innerHTML = `
+        <div class="modal" style="max-width: 480px;">
+          <h2 style="margin-bottom: 8px;">📝 훈련 분류 변경</h2>
+          <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">
+            ${workout.name} (${workout.date})
+          </p>
+          
+          <div style="margin-bottom: 16px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 8px; font-size: 13px;">
+            <div style="color: #60a5fa; margin-bottom: 4px;">🤖 자동 분류 결과</div>
+            <div style="color: #94a3b8;">${workout.autoType || workout.type} (HR: ${workout.avgHR || '-'}bpm, 시간: ${workout.duration}분)</div>
+          </div>
+          
+          <div class="form-group">
+            <label>훈련 유형</label>
+            <select class="form-input" id="newType" onchange="toggleSubTypeSelect()">
+              ${types.map(t => `
+                <option value="${t.value}" ${workout.type === t.value ? 'selected' : ''}>
+                  ${t.label}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+          
+          <div class="form-group" id="subTypeGroup" style="margin-top: 16px; display: ${workout.type === 'sub-t' ? 'block' : 'none'};">
+            <label>인터벌 유형</label>
+            <select class="form-input" id="newSubType">
+              ${subTypes.map(t => `
+                <option value="${t.value}" ${workout.subType === t.value ? 'selected' : ''}>
+                  ${t.label}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+          
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" style="flex: 1;" onclick="saveTypeChange(${id})">
+              저장
+            </button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeTypeModal()">
+              취소
+            </button>
+          </div>
+          
+          ${(workout.autoType && workout.type !== workout.autoType) ? `
+            <button class="btn" style="width: 100%; margin-top: 12px; background: rgba(100,116,139,0.3);" onclick="resetToAutoType(${id})">
+              🔄 자동 분류로 복원
+            </button>
+          ` : ''}
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function toggleSubTypeSelect() {
+      const type = document.getElementById('newType').value;
+      const subTypeGroup = document.getElementById('subTypeGroup');
+      if (subTypeGroup) {
+        subTypeGroup.style.display = type === 'sub-t' ? 'block' : 'none';
+      }
+    }
+    
+    function closeTypeModal() {
+      const modal = document.getElementById('typeModal');
+      if (modal) modal.remove();
+    }
+    
+    async function saveTypeChange(id) {
+      const type = document.getElementById('newType').value;
+      const subType = document.getElementById('newSubType')?.value;
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/activity/${id}/correction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ 
+            type: type,
+            subType: type === 'sub-t' ? subType : null
+          })
+        });
+        
+        if (response.ok) {
+          const workout = workouts.find(w => w.id === id);
+          if (workout) {
+            workout.type = type;
+            workout.subType = type === 'sub-t' ? subType : null;
+            workout.hasUserCorrection = true;
+          }
+        }
+        
+        closeTypeModal();
+        renderWorkouts();
+        updateDashboard();
+        updatePredictedRaceTimes();
+      } catch (error) {
+        console.error('분류 변경 저장 실패:', error);
+      }
+    }
+    
+    async function resetToAutoType(id) {
+      const workout = workouts.find(w => w.id === id);
+      if (!workout || !workout.autoType) return;
+      
+      try {
+        await fetch(`${API_BASE}/api/strava/activity/${id}/correction`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        workout.type = workout.autoType;
+        workout.hasUserCorrection = false;
+        
+        closeTypeModal();
+        renderWorkouts();
+        updateDashboard();
+      } catch (error) {
+        console.error('자동 분류 복원 실패:', error);
+      }
+    }
+    
+    function updateDashboard() {
+      // 워밍업/쿨다운 제외한 활동만 필터링
+      const mainWorkouts = workouts.filter(w => w.type !== 'warmup-cooldown');
+      
+      // Count workout types
+      const subTCount = mainWorkouts.filter(w => w.type === 'sub-t').length;
+      const easyCount = mainWorkouts.filter(w => w.type === 'easy').length;
+      const longCount = mainWorkouts.filter(w => w.type === 'long').length;
+      const warmupCount = workouts.filter(w => w.type === 'warmup-cooldown').length;
+      
+      // Calculate quality volume (워밍업/쿨다운 제외)
+      const totalTime = mainWorkouts.reduce((sum, w) => sum + w.duration, 0);
+      const qualityTime = mainWorkouts.filter(w => w.type === 'sub-t')
         .reduce((sum, w) => sum + (w.duration * 0.6), 0);
       const qualityPercent = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
       
@@ -1333,6 +1572,13 @@
           <div class="stat-value" style="color: #60a5fa;">${qualityPercent}%</div>
           <div class="stat-label">퀄리티 비율</div>
         </div>
+        ${warmupCount > 0 ? `
+          <div class="stat-card" style="opacity: 0.6;">
+            <div class="stat-icon" style="background: rgba(100,116,139,0.2);">🔄</div>
+            <div class="stat-value" style="color: #94a3b8;">${warmupCount}</div>
+            <div class="stat-label">워밍업/쿨다운</div>
+          </div>
+        ` : ''}
       `;
       
       // Update quality percent display
@@ -1347,7 +1593,7 @@
       // Update compliance scores
       const structureScore = Math.min(100, (subTCount >= 2 ? 40 : subTCount * 20) + (longCount >= 1 ? 30 : 0) + (easyCount >= 2 ? 30 : easyCount * 15));
       const maxHR = 190;
-      const easyTooHard = workouts.filter(w => w.type === 'easy' && w.avgHR && w.avgHR > maxHR * 0.70).length;
+      const easyTooHard = mainWorkouts.filter(w => w.type === 'easy' && w.avgHR && w.avgHR > maxHR * 0.70).length;
       const easyScore = Math.min(100, 100 - (easyTooHard * 25));
       
       document.getElementById('complianceScores').innerHTML = `
@@ -1672,7 +1918,7 @@
       const predictedSection = document.getElementById('predictedRaceTimes');
       if (!predictedSection) return;
       
-      // Sub-T 세션 필터링
+      // Sub-T 세션 필터링 (워밍업/쿨다운 제외)
       const subTWorkouts = workouts.filter(w => w.type === 'sub-t' && w.avgPace && w.avgPace !== 'N/A');
       
       if (subTWorkouts.length === 0) {
@@ -1687,8 +1933,8 @@
       
       subTWorkouts.forEach(w => {
         // 우선순위: 수정된 인터벌 페이스 > 수정된 평균 페이스 > 원본 페이스
-        const paceToUse = w.userCorrectedIntervalPace || w.userCorrectedPace || w.avgPace;
-        if (w.userCorrectedIntervalPace || w.userCorrectedPace) hasCorrectedPace = true;
+        const paceToUse = w.intervalPace || w.correctedPace || w.avgPace;
+        if (w.intervalPace || w.correctedPace) hasCorrectedPace = true;
         
         const parts = paceToUse.split(':');
         if (parts.length === 2) {
@@ -1756,18 +2002,25 @@
       startOfWeek.setDate(today.getDate() - dayOfWeek);
       startOfWeek.setHours(0, 0, 0, 0);
       
-      // 이번 주 운동 필터링
+      // 이번 주 운동 필터링 (워밍업/쿨다운 제외)
       const thisWeekWorkouts = workouts.filter(w => {
+        if (w.type === 'warmup-cooldown') return false;
         const workoutDate = new Date(w.date);
         return workoutDate >= startOfWeek && workoutDate <= today;
       });
       
-      // 요일별 운동 매핑
+      // 요일별 운동 매핑 (워밍업/쿨다운 제외)
       const workoutsByDay = {};
       thisWeekWorkouts.forEach(w => {
         const d = new Date(w.date);
         const day = d.getDay();
-        workoutsByDay[day] = w;
+        // 같은 날 여러 운동이 있으면 메인 운동(Sub-T > Long > Easy) 우선
+        const existing = workoutsByDay[day];
+        if (!existing || 
+            (w.type === 'sub-t') ||
+            (w.type === 'long' && existing.type !== 'sub-t')) {
+          workoutsByDay[day] = w;
+        }
       });
       
       return {
@@ -2230,6 +2483,68 @@
           💡 이 패턴을 매주 반복하며 점진적으로 발전하세요
         </div>
       `;
+    }
+
+    // ===== 일정 불일치 체크 =====
+    
+    async function checkScheduleMismatch() {
+      try {
+        const response = await fetch(`${API_BASE}/api/schedule/analysis`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        const card = document.getElementById('scheduleMismatchCard');
+        const content = document.getElementById('scheduleMismatchContent');
+        
+        if (!card || !content) return;
+        
+        if (data.success && data.hasMismatches) {
+          const typeNames = {
+            'sub-t': 'Sub-T',
+            'easy': 'Easy Run',
+            'long': 'Long Run'
+          };
+          
+          let html = `
+            <div style="font-size: 14px; color: #94a3b8; margin-bottom: 12px;">
+              이번 주 권장 일정과 다르게 훈련한 날이 있습니다:
+            </div>
+            <div style="display: grid; gap: 8px;">
+          `;
+          
+          data.mismatches.forEach(m => {
+            html += `
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(30,41,59,0.5); border-radius: 10px;">
+                <div style="min-width: 50px; font-weight: 600;">${m.date.slice(5)}</div>
+                <div style="min-width: 30px; color: #64748b;">(${m.dayName})</div>
+                <div style="flex: 1;">
+                  <span style="color: #f87171; text-decoration: line-through;">${typeNames[m.recommended] || m.recommended}</span>
+                  <span style="color: #64748b;"> → </span>
+                  <span style="color: #fbbf24;">${typeNames[m.actual] || m.actual}</span>
+                </div>
+                <div style="font-size: 12px; color: #64748b; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  ${m.activityName}
+                </div>
+              </div>
+            `;
+          });
+          
+          html += `
+            </div>
+            <div style="margin-top: 12px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 10px; font-size: 13px; color: #94a3b8;">
+              💡 피로, 부상, 일정 등의 이유로 조정은 괜찮습니다. 다만 너무 자주 바뀌면 훈련 효과가 떨어질 수 있습니다.
+            </div>
+          `;
+          
+          content.innerHTML = html;
+          card.classList.remove('hidden');
+        } else {
+          card.classList.add('hidden');
+        }
+      } catch (error) {
+        console.error('일정 분석 에러:', error);
+      }
     }
 
     // ===== Initialize =====
