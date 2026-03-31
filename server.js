@@ -327,8 +327,10 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     const activity = await activityRes.json();
     const laps = lapsRes.ok ? await lapsRes.json() : [];
     
-    const analysis = analyzeLaps(laps, activity);
     const correction = (req.session.corrections || {})[req.params.id] || {};
+    const lapCorrections = correction.laps || {};
+    
+    const analysis = analyzeLaps(laps, activity, lapCorrections);
     
     res.json({
       success: true,
@@ -347,7 +349,8 @@ app.get('/api/strava/activity/:id', async (req, res) => {
       laps: analysis.laps,
       intervalStats: analysis.intervalAnalysis,
       intervalSets: analysis.intervalSets || [],
-      correction: correction
+      correction: correction,
+      lapCorrections: lapCorrections
     });
   } catch (error) {
     console.error('활동 상세 조회 에러:', error);
@@ -382,6 +385,51 @@ app.post('/api/strava/activity/:id/correction', (req, res) => {
 app.delete('/api/strava/activity/:id/correction', (req, res) => {
   if (req.session.corrections) {
     delete req.session.corrections[req.params.id];
+  }
+  res.json({ success: true });
+});
+
+// 랩별 수정 API
+app.post('/api/strava/activity/:id/lap/:lapNum/correction', (req, res) => {
+  const { id, lapNum } = req.params;
+  const { type, pace } = req.body;
+  
+  if (!req.session.corrections) {
+    req.session.corrections = {};
+  }
+  
+  if (!req.session.corrections[id]) {
+    req.session.corrections[id] = {};
+  }
+  
+  if (!req.session.corrections[id].laps) {
+    req.session.corrections[id].laps = {};
+  }
+  
+  req.session.corrections[id].laps[lapNum] = {
+    type: type || null,
+    pace: pace || null,
+    updatedAt: new Date().toISOString()
+  };
+  
+  res.json({ success: true, lapCorrection: req.session.corrections[id].laps[lapNum] });
+});
+
+app.delete('/api/strava/activity/:id/lap/:lapNum/correction', (req, res) => {
+  const { id, lapNum } = req.params;
+  
+  if (req.session.corrections?.[id]?.laps) {
+    delete req.session.corrections[id].laps[lapNum];
+  }
+  res.json({ success: true });
+});
+
+// 모든 랩 수정 초기화
+app.delete('/api/strava/activity/:id/laps/correction', (req, res) => {
+  const { id } = req.params;
+  
+  if (req.session.corrections?.[id]) {
+    req.session.corrections[id].laps = {};
   }
   res.json({ success: true });
 });
@@ -471,77 +519,138 @@ app.get('/api/schedule/analysis', async (req, res) => {
 
 // ===== 헬퍼 함수 =====
 
-function analyzeLaps(laps, activity) {
+function analyzeLaps(laps, activity, lapCorrections = {}) {
   if (!laps || laps.length === 0) {
     return { laps: [], intervalAnalysis: null, intervalSets: [] };
   }
   
   const userMaxHR = 190; // 사용자 최대 심박수
-  const allPaces = laps.map(l => l.average_speed > 0 ? 1000 / l.average_speed : 999);
-  const medianPace = allPaces.sort((a, b) => a - b)[Math.floor(allPaces.length / 2)];
   
-  const analyzedLaps = laps.map((lap, index) => {
+  // 1단계: 기본 데이터 추출
+  const lapData = laps.map((lap, index) => {
     const avgHR = lap.average_heartrate || 0;
     const hrPercent = userMaxHR > 0 ? (avgHR / userMaxHR) * 100 : 0;
     const pace = lap.average_speed > 0 ? 1000 / lap.average_speed : 999;
-    
-    let lapType = 'unknown';
-    
-    // 매우 느린 페이스 (8분/km 이상) → 휴식
-    if (pace > 480) {
-      lapType = 'rest';
-    }
-    // 첫 번째 랩이고 HR이 낮으면 워밍업
-    else if (index === 0 && hrPercent < 75) {
-      lapType = 'warmup';
-    }
-    // 마지막 랩이고 HR이 낮으면 쿨다운
-    else if (index === laps.length - 1 && hrPercent < 75) {
-      lapType = 'cooldown';
-    }
-    // 페이스가 중간값보다 40% 이상 느리면 휴식
-    else if (pace > medianPace * 1.4) {
-      lapType = 'rest';
-    }
-    // HR 75% 이상이고 페이스가 적당하면 인터벌
-    else if (hrPercent >= 75 && pace < medianPace * 1.2) {
-      lapType = 'interval';
-    }
-    // HR 70-75%면 이지
-    else if (hrPercent >= 70 && hrPercent < 75) {
-      lapType = 'easy';
-    }
-    // HR 70% 미만이면 워밍업
-    else if (hrPercent < 70) {
-      lapType = 'warmup';
-    }
-    // 그 외 HR 높으면 인터벌
-    else if (hrPercent >= 75) {
-      lapType = 'interval';
-    }
-    else {
-      lapType = 'easy';
-    }
+    const distance = lap.distance / 1000;
     
     return {
+      index,
       lap: index + 1,
-      distance: (lap.distance / 1000).toFixed(2),
+      distance,
       distanceMeters: lap.distance,
       duration: Math.round(lap.moving_time / 60 * 10) / 10,
       durationSeconds: lap.moving_time,
-      pace: formatPaceFromSeconds(pace),
+      pace,
+      paceFormatted: formatPaceFromSeconds(pace),
       paceSeconds: Math.round(pace),
       avgHR: avgHR ? Math.round(avgHR) : null,
-      hrPercent: Math.round(hrPercent),
-      type: lapType
+      hrPercent: Math.round(hrPercent)
     };
   });
+  
+  // 2단계: 인터벌 후보 식별 (거리 0.5km 이상, 페이스 6분/km 이하)
+  const workLaps = lapData.filter(l => l.distance >= 0.5 && l.pace <= 360);
+  const restLaps = lapData.filter(l => l.distance < 0.1 || l.pace > 480);
+  
+  // 3단계: 작업 랩들의 페이스 분포 분석
+  let fastPaceThreshold = 300; // 기본 5분/km
+  if (workLaps.length >= 3) {
+    const workPaces = workLaps.map(l => l.pace).sort((a, b) => a - b);
+    const fastestQuartile = workPaces[Math.floor(workPaces.length * 0.25)];
+    const medianPace = workPaces[Math.floor(workPaces.length * 0.5)];
+    // 빠른 랩 기준: 중간값의 1.1배 이내
+    fastPaceThreshold = medianPace * 1.1;
+  }
+  
+  // 4단계: 랩 분류
+  const analyzedLaps = lapData.map((lap, index) => {
+    // 사용자가 수동으로 수정한 분류가 있으면 우선 적용
+    const correction = lapCorrections[lap.lap] || {};
+    if (correction.type) {
+      return {
+        ...lap,
+        pace: correction.pace ? parsePaceToSeconds(correction.pace) : lap.pace,
+        paceFormatted: correction.pace || lap.paceFormatted,
+        paceSeconds: correction.pace ? parsePaceToSeconds(correction.pace) : lap.paceSeconds,
+        type: correction.type,
+        userCorrected: true
+      };
+    }
+    
+    let lapType = 'unknown';
+    
+    // 매우 짧은 거리 (0.1km 미만) → 휴식
+    if (lap.distance < 0.1) {
+      lapType = 'rest';
+    }
+    // 매우 느린 페이스 (8분/km 이상) → 휴식
+    else if (lap.pace > 480) {
+      lapType = 'rest';
+    }
+    // 빠른 페이스 + 적절한 거리 (0.5km 이상) → 인터벌
+    else if (lap.pace <= fastPaceThreshold && lap.distance >= 0.5) {
+      lapType = 'interval';
+    }
+    // 느린 페이스 (기준보다 30% 이상 느림) → 휴식 또는 이지
+    else if (lap.pace > fastPaceThreshold * 1.3) {
+      lapType = lap.distance < 0.3 ? 'rest' : 'easy';
+    }
+    // HR 기반 보조 분류
+    else if (lap.hrPercent >= 75) {
+      lapType = 'interval';
+    }
+    else if (lap.hrPercent >= 65 && lap.hrPercent < 75) {
+      lapType = 'easy';
+    }
+    // 마지막 랩이고 짧으면 쿨다운
+    else if (index === lapData.length - 1 && lap.distance < 0.5) {
+      lapType = 'cooldown';
+    }
+    // 첫 번째 랩이고 다음 랩이 휴식이면 워밍업일 가능성
+    else if (index === 0 && lapData.length > 1) {
+      const nextLap = lapData[1];
+      if (nextLap.distance < 0.1 || nextLap.pace > 480) {
+        // 다음이 휴식이면 현재는 인터벌
+        lapType = 'interval';
+      } else if (lap.hrPercent < 70) {
+        lapType = 'warmup';
+      } else {
+        lapType = 'interval';
+      }
+    }
+    else {
+      // 기본: 페이스가 빠른 편이면 인터벌, 아니면 이지
+      lapType = lap.pace <= fastPaceThreshold * 1.15 ? 'interval' : 'easy';
+    }
+    
+    return {
+      ...lap,
+      paceFormatted: lap.paceFormatted,
+      type: lapType,
+      userCorrected: false
+    };
+  });
+  
+  // 최종 형식으로 변환
+  const finalLaps = analyzedLaps.map(lap => ({
+    lap: lap.lap,
+    distance: lap.distance.toFixed(2),
+    distanceMeters: lap.distanceMeters,
+    duration: lap.duration,
+    durationSeconds: lap.durationSeconds,
+    pace: lap.paceFormatted,
+    paceSeconds: lap.paceSeconds,
+    avgHR: lap.avgHR,
+    hrPercent: lap.hrPercent,
+    type: lap.type,
+    userCorrected: lap.userCorrected || false
+  }));
   
   // === 연속 인터벌 랩을 "인터벌 세트"로 합치기 ===
   const intervalSets = [];
   let currentSet = null;
   
-  analyzedLaps.forEach((lap, index) => {
+  finalLaps.forEach((lap, index) => {
     if (lap.type === 'interval') {
       if (!currentSet) {
         // 새로운 인터벌 세트 시작
@@ -619,7 +728,17 @@ function analyzeLaps(laps, activity) {
     };
   }
   
-  return { laps: analyzedLaps, intervalAnalysis, intervalSets };
+  return { laps: finalLaps, intervalAnalysis, intervalSets };
+}
+
+// 페이스 문자열을 초로 변환 (예: "4:30" → 270)
+function parsePaceToSeconds(paceStr) {
+  if (!paceStr) return 0;
+  const parts = paceStr.split(':');
+  if (parts.length === 2) {
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+  return 0;
 }
 
 function classifyType(a) {

@@ -1222,8 +1222,8 @@
       // 전체 랩 상세 (접기/펴기)
       if (laps.length > 0) {
         html += `
-          <details style="margin-top: 16px;">
-            <summary style="font-weight: 600; cursor: pointer; padding: 8px 0; color: #94a3b8;">📋 전체 랩 상세 보기 (${laps.length}개 랩)</summary>
+          <details style="margin-top: 16px;" open>
+            <summary style="font-weight: 600; cursor: pointer; padding: 8px 0; color: #94a3b8;">📋 전체 랩 상세 보기 (${laps.length}개 랩) - 클릭하여 수정 가능</summary>
             <div style="display: grid; gap: 8px; margin-top: 12px;">
         `;
         
@@ -1239,11 +1239,16 @@
           };
           const cat = categoryColors[lap.type] || categoryColors.unknown;
           const isInterval = lap.type === 'interval';
+          const isUserCorrected = lap.userCorrected;
           
           html += `
-            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 8px; ${isInterval ? 'box-shadow: 0 0 8px rgba(245,158,11,0.2);' : ''}">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 8px; cursor: pointer; transition: transform 0.1s; ${isInterval ? 'box-shadow: 0 0 8px rgba(245,158,11,0.2);' : ''}" 
+                 onclick="openLapEditModal(${activity.id}, ${lap.lap}, '${lap.type}', '${lap.pace}')"
+                 title="클릭하여 분류/페이스 수정">
               <div style="min-width: 24px; font-size: 13px; color: #64748b;">#${lap.lap}</div>
-              <div style="width: 80px; font-size: 12px; color: ${cat.text}; font-weight: 600;">${cat.label}</div>
+              <div style="width: 90px; font-size: 12px; color: ${cat.text}; font-weight: 600;">
+                ${cat.label} ${isUserCorrected ? '✏️' : ''}
+              </div>
               <div style="flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 13px;">
                 <div><span style="color: #64748b;">거리:</span> ${lap.distance}km</div>
                 <div><span style="color: #64748b;">시간:</span> ${lap.duration}분</div>
@@ -1254,7 +1259,13 @@
           `;
         });
         
-        html += `</div></details>`;
+        html += `</div>
+          <div style="margin-top: 12px; display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="resetAllLapCorrections(${activity.id})">
+              🔄 모든 랩 수정 초기화
+            </button>
+          </div>
+        </details>`;
       }
       
       html += `</div>`;
@@ -1525,6 +1536,168 @@
         updateDashboard();
       } catch (error) {
         console.error('자동 분류 복원 실패:', error);
+      }
+    }
+    
+    // === 랩 수정 모달 ===
+    function openLapEditModal(activityId, lapNum, currentType, currentPace) {
+      const types = [
+        { value: 'interval', label: '⚡ 인터벌', color: '#fbbf24' },
+        { value: 'easy', label: '🚶 이지', color: '#22c55e' },
+        { value: 'warmup', label: '🔥 워밍업', color: '#60a5fa' },
+        { value: 'cooldown', label: '❄️ 쿨다운', color: '#a78bfa' },
+        { value: 'rest', label: '🚶 휴식', color: '#22c55e' }
+      ];
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.id = 'lapEditModal';
+      modal.innerHTML = `
+        <div class="modal" style="max-width: 420px;">
+          <h2 style="margin-bottom: 8px;">✏️ 랩 #${lapNum} 수정</h2>
+          <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">
+            분류와 페이스를 수동으로 변경할 수 있습니다
+          </p>
+          
+          <div class="form-group">
+            <label>랩 분류</label>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+              ${types.map(t => `
+                <button type="button" class="lap-type-btn ${currentType === t.value ? 'active' : ''}" 
+                        data-type="${t.value}"
+                        style="padding: 10px 8px; border-radius: 8px; border: 2px solid ${currentType === t.value ? t.color : 'rgba(100,116,139,0.3)'}; 
+                               background: ${currentType === t.value ? t.color + '20' : 'transparent'}; 
+                               color: ${currentType === t.value ? t.color : '#94a3b8'}; cursor: pointer; font-size: 12px;
+                               transition: all 0.2s;"
+                        onclick="selectLapType(this, '${t.value}', '${t.color}')">
+                  ${t.label}
+                </button>
+              `).join('')}
+            </div>
+            <input type="hidden" id="selectedLapType" value="${currentType}">
+          </div>
+          
+          <div class="form-group" style="margin-top: 16px;">
+            <label>페이스 (트레드밀 수정용)</label>
+            <input type="text" class="form-input" id="lapPaceInput" 
+              value="${currentPace === 'N/A' ? '' : currentPace}" 
+              placeholder="4:30">
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+              현재: ${currentPace}/km (비워두면 원본 유지)
+            </div>
+          </div>
+          
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" style="flex: 1;" onclick="saveLapCorrection(${activityId}, ${lapNum})">
+              저장
+            </button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeLapEditModal()">
+              취소
+            </button>
+          </div>
+          
+          <button class="btn" style="width: 100%; margin-top: 12px; background: rgba(100,116,139,0.3);" onclick="resetLapCorrection(${activityId}, ${lapNum})">
+            🔄 이 랩 수정 초기화
+          </button>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function selectLapType(btn, type, color) {
+      // 모든 버튼 비활성화 스타일
+      document.querySelectorAll('.lap-type-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.borderColor = 'rgba(100,116,139,0.3)';
+        b.style.background = 'transparent';
+        b.style.color = '#94a3b8';
+      });
+      
+      // 선택된 버튼 활성화
+      btn.classList.add('active');
+      btn.style.borderColor = color;
+      btn.style.background = color + '20';
+      btn.style.color = color;
+      
+      document.getElementById('selectedLapType').value = type;
+    }
+    
+    function closeLapEditModal() {
+      const modal = document.getElementById('lapEditModal');
+      if (modal) modal.remove();
+    }
+    
+    async function saveLapCorrection(activityId, lapNum) {
+      const type = document.getElementById('selectedLapType').value;
+      const pace = document.getElementById('lapPaceInput').value.trim();
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/activity/${activityId}/lap/${lapNum}/correction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ type, pace: pace || null })
+        });
+        
+        if (response.ok) {
+          closeLapEditModal();
+          // 활동 상세 다시 불러오기
+          await reloadActivityDetail(activityId);
+        }
+      } catch (error) {
+        console.error('랩 수정 저장 실패:', error);
+      }
+    }
+    
+    async function resetLapCorrection(activityId, lapNum) {
+      try {
+        await fetch(`${API_BASE}/api/strava/activity/${activityId}/lap/${lapNum}/correction`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        closeLapEditModal();
+        await reloadActivityDetail(activityId);
+      } catch (error) {
+        console.error('랩 수정 초기화 실패:', error);
+      }
+    }
+    
+    async function resetAllLapCorrections(activityId) {
+      if (!confirm('모든 랩 수정을 초기화하시겠습니까?')) return;
+      
+      try {
+        await fetch(`${API_BASE}/api/strava/activity/${activityId}/laps/correction`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        await reloadActivityDetail(activityId);
+      } catch (error) {
+        console.error('모든 랩 수정 초기화 실패:', error);
+      }
+    }
+    
+    async function reloadActivityDetail(activityId) {
+      try {
+        const response = await fetch(`${API_BASE}/api/strava/activity/${activityId}`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          selectedActivity = {
+            ...data.activity,
+            intervalStats: data.intervalStats,
+            intervalSets: data.intervalSets || [],
+            laps: data.laps,
+            correction: data.correction
+          };
+          renderWorkouts();
+        }
+      } catch (error) {
+        console.error('활동 상세 다시 불러오기 실패:', error);
       }
     }
     
