@@ -150,6 +150,44 @@ Garmin 데이터를 Strava에서 보려면 동기화를 설정해야 합니다:
 | "redirect_uri mismatch" 에러 | Strava API 설정에서 Callback Domain 수정 |
 | 데이터가 안 불러와짐 | Garmin → Strava 동기화 설정 확인 |
 | 무한 로딩 | Render 로그 확인 (Logs 탭) |
+| 연결은 되는데 로그인 상태 유지 안됨 | 아래 디버깅 가이드 참고 |
+
+### 🔧 연결 문제 디버깅
+
+연결이 안 될 때 다음 순서로 확인하세요:
+
+#### 1. 디버그 엔드포인트 확인
+브라우저에서 `https://YOUR-RENDER-URL/api/debug` 접속
+
+확인해야 할 값:
+- `hasStravaId`: true여야 함
+- `hasStravaSecret`: true여야 함
+- `baseUrl`: Render URL이어야 함 (localhost가 아님!)
+- `isProduction`: true여야 함
+
+#### 2. Render 로그 확인
+Render 대시보드 → 해당 서비스 → **Logs** 탭
+
+로그인 시도 시 다음 로그가 보여야 함:
+```
+[Auth] Starting Strava OAuth...
+[Auth] BASE_URL: https://your-app.onrender.com
+[Callback] Received callback
+[Callback] Token response status: 200
+[Callback] Session saved successfully
+```
+
+#### 3. Strava Callback Domain 확인
+https://www.strava.com/settings/api 에서:
+- Authorization Callback Domain이 Render URL과 일치하는지 확인
+- `https://` 없이 도메인만 입력 (예: `norwegian-singles-strava.onrender.com`)
+
+#### 4. 환경 변수 재확인
+Render 대시보드 → Environment 탭에서:
+- `STRAVA_CLIENT_ID`: 숫자만 입력 (따옴표 없이)
+- `STRAVA_CLIENT_SECRET`: 전체 문자열 복사 (앞뒤 공백 없이)
+- `SESSION_SECRET`: 아무 문자열
+- `NODE_ENV`: `production`
 
 ---
 

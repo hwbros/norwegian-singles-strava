@@ -18,37 +18,99 @@ const PORT = process.env.PORT || 3000;
 // Strava API 설정
 const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
-const BASE_URL = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${PORT}`;
 
-// Trust proxy for Render
+// BASE_URL 결정 함수 (요청 시점에 동적으로 결정)
+function getBaseUrl(req) {
+  // 환경 변수에 명시적으로 설정된 경우 우선 사용
+  if (process.env.BASE_URL) return process.env.BASE_URL;
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+  
+  // 요청 헤더에서 추출
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+  
+  return `http://localhost:${PORT}`;
+}
+
+// Render/Heroku 등 프록시 환경 지원
 app.set('trust proxy', 1);
+
+// 환경 확인 (디버그용)
+const isProduction = process.env.NODE_ENV === 'production' || !!process.env.RENDER_EXTERNAL_URL;
+console.log('=== Server Config ===');
+console.log('PORT:', PORT);
+console.log('isProduction:', isProduction);
+console.log('STRAVA_CLIENT_ID:', STRAVA_CLIENT_ID ? 'SET' : 'NOT SET');
+console.log('STRAVA_CLIENT_SECRET:', STRAVA_CLIENT_SECRET ? 'SET' : 'NOT SET');
+console.log('====================');
 
 // 미들웨어
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.static('public'));
-app.use(session({
+
+// 세션 설정 - Render 환경에 맞게 조정
+const sessionConfig = {
   secret: process.env.SESSION_SECRET || 'norwegian-singles-strava-secret',
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: { 
-    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7일
   }
-}));
+};
+
+// 프로덕션 환경에서만 secure 쿠키 사용
+if (isProduction) {
+  sessionConfig.cookie.secure = true;
+  sessionConfig.cookie.sameSite = 'lax'; // 같은 사이트 내에서는 lax가 더 안정적
+}
+
+app.use(session(sessionConfig));
+
+// 디버그 엔드포인트
+app.get('/api/debug', (req, res) => {
+  const baseUrl = getBaseUrl(req);
+  res.json({
+    baseUrl: baseUrl,
+    isProduction,
+    hasStravaId: !!STRAVA_CLIENT_ID,
+    hasStravaSecret: !!STRAVA_CLIENT_SECRET,
+    sessionId: req.sessionID,
+    hasSession: !!req.session,
+    hasStravaData: !!req.session?.strava,
+    cookies: req.headers.cookie ? 'present' : 'none',
+    headers: {
+      host: req.headers.host,
+      xForwardedProto: req.headers['x-forwarded-proto'],
+      xForwardedHost: req.headers['x-forwarded-host']
+    }
+  });
+});
 
 // ===== Strava OAuth =====
 
 app.get('/api/strava/auth', (req, res) => {
+  const baseUrl = getBaseUrl(req);
+  console.log('[Auth] Starting Strava OAuth...');
+  console.log('[Auth] BASE_URL:', baseUrl);
+  
   if (!STRAVA_CLIENT_ID) {
+    console.error('[Auth] STRAVA_CLIENT_ID not set!');
     return res.status(500).json({ error: 'Strava Client ID가 설정되지 않았습니다.' });
   }
   
-  const redirectUri = `${BASE_URL}/api/strava/callback`;
+  const redirectUri = `${baseUrl}/api/strava/callback`;
   const scope = 'read,activity:read_all';
   const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}`;
+  
+  console.log('[Auth] Redirect URI:', redirectUri);
+  console.log('[Auth] Redirecting to Strava...');
   
   res.redirect(authUrl);
 });
@@ -56,11 +118,18 @@ app.get('/api/strava/auth', (req, res) => {
 app.get('/api/strava/callback', async (req, res) => {
   const { code, error } = req.query;
   
+  console.log('[Callback] Received callback');
+  console.log('[Callback] Code:', code ? 'present' : 'missing');
+  console.log('[Callback] Error:', error || 'none');
+  
   if (error || !code) {
+    console.error('[Callback] Access denied or no code');
     return res.redirect('/?error=access_denied');
   }
   
   try {
+    console.log('[Callback] Exchanging code for token...');
+    
     const response = await fetch('https://www.strava.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -74,6 +143,9 @@ app.get('/api/strava/callback', async (req, res) => {
     
     const data = await response.json();
     
+    console.log('[Callback] Token response status:', response.status);
+    console.log('[Callback] Has access_token:', !!data.access_token);
+    
     if (data.access_token) {
       req.session.strava = {
         accessToken: data.access_token,
@@ -82,12 +154,23 @@ app.get('/api/strava/callback', async (req, res) => {
         athlete: data.athlete
       };
       req.session.corrections = req.session.corrections || {};
-      res.redirect('/?connected=true');
+      
+      // 세션 저장 확인
+      req.session.save((err) => {
+        if (err) {
+          console.error('[Callback] Session save error:', err);
+          return res.redirect('/?error=session_failed');
+        }
+        console.log('[Callback] Session saved successfully');
+        console.log('[Callback] Athlete:', data.athlete?.firstname, data.athlete?.lastname);
+        res.redirect('/?connected=true');
+      });
     } else {
+      console.error('[Callback] Token exchange failed:', data);
       res.redirect('/?error=token_failed');
     }
   } catch (error) {
-    console.error('Strava 콜백 에러:', error);
+    console.error('[Callback] Exception:', error);
     res.redirect('/?error=callback_failed');
   }
 });
@@ -127,15 +210,22 @@ async function refreshStravaToken(session) {
 }
 
 app.get('/api/strava/status', async (req, res) => {
+  console.log('[Status] Checking session...');
+  console.log('[Status] Session ID:', req.sessionID);
+  console.log('[Status] Has strava data:', !!req.session.strava);
+  
   if (req.session.strava?.accessToken) {
+    console.log('[Status] Token exists, refreshing if needed...');
     const token = await refreshStravaToken(req.session);
     if (token) {
+      console.log('[Status] User logged in:', req.session.strava.athlete?.firstname);
       return res.json({ 
         loggedIn: true, 
         athlete: req.session.strava.athlete 
       });
     }
   }
+  console.log('[Status] Not logged in');
   res.json({ loggedIn: false });
 });
 
