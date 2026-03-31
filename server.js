@@ -262,7 +262,12 @@ app.get('/api/strava/activities', async (req, res) => {
       .filter(a => a.type === 'Run' || a.type === 'VirtualRun' || a.type === 'TrailRun')
       .map(a => {
         const correction = corrections[a.id] || {};
-        const isTreadmill = a.type === 'VirtualRun';
+        const name = (a.name || '').toLowerCase();
+        // 트레드밀 감지: VirtualRun 타입 또는 이름에 "트레드밀", "treadmill" 포함
+        const isTreadmill = a.type === 'VirtualRun' || 
+                           name.includes('트레드밀') || 
+                           name.includes('treadmill') ||
+                           name.includes('러닝머신');
         const autoType = classifyType(a);
         
         // 사용자가 수정한 분류가 있으면 우선 사용
