@@ -1026,7 +1026,7 @@
       
       let html = '';
       workouts.forEach(w => {
-        const isExpanded = selectedActivity?.id === w.id;
+        const isExpanded = selectedActivity?.id == w.id;
         const isLoading = loadingActivity === w.id;
         const isWarmupCooldown = w.type === 'warmup-cooldown';
         
@@ -1112,7 +1112,7 @@
     
     // 활동 상세 정보 토글
     async function toggleActivityDetail(id) {
-      if (selectedActivity?.id === id) {
+      if (selectedActivity?.id == id) {
         selectedActivity = null;
         renderWorkouts();
         return;
@@ -1149,6 +1149,12 @@
       const stats = activity.intervalStats;
       const laps = activity.laps || [];
       const intervalSets = activity.intervalSets || [];
+      const correction = activity.correction || {};
+      
+      // 수정된 인터벌 페이스가 있으면 우선 사용
+      const displayIntervalPace = correction.intervalPace || (stats ? stats.avgPace : '-');
+      const displayIntervalHR = correction.intervalHR || (stats ? stats.avgHR : null);
+      const hasPaceCorrection = !!correction.intervalPace;
       
       let html = `<div class="activity-detail" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(100,116,139,0.3);">`;
       
@@ -1156,7 +1162,10 @@
       if (stats && stats.count > 0) {
         html += `
           <div style="margin-bottom: 16px; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border: 1px solid rgba(245,158,11,0.2);">
-            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 12px;">🎯 인터벌 세트 통계 (연속 구간 합산)</div>
+            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 12px;">
+              🎯 인터벌 세트 통계 (연속 구간 합산)
+              ${hasPaceCorrection ? '<span style="font-size: 12px; color: #22c55e; margin-left: 8px;">✏️ 수정된 페이스 적용됨</span>' : ''}
+            </div>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; text-align: center;">
               <div>
                 <div style="font-size: 12px; color: #64748b;">인터벌 세트</div>
@@ -1168,11 +1177,12 @@
               </div>
               <div>
                 <div style="font-size: 12px; color: #64748b;">인터벌 평균 페이스</div>
-                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.avgPace}/km</div>
+                <div style="font-size: 20px; font-weight: 700; color: ${hasPaceCorrection ? '#22c55e' : '#fbbf24'};">${displayIntervalPace}/km</div>
+                ${hasPaceCorrection && stats.avgPace ? `<div style="font-size: 11px; color: #64748b; text-decoration: line-through;">${stats.avgPace}/km (원본)</div>` : ''}
               </div>
               <div>
                 <div style="font-size: 12px; color: #64748b;">인터벌 평균 HR</div>
-                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${stats.avgHR || '-'}bpm</div>
+                <div style="font-size: 20px; font-weight: 700; color: #fbbf24;">${displayIntervalHR || '-'}bpm</div>
               </div>
             </div>
           </div>
@@ -1274,7 +1284,7 @@
     
     // 페이스 수정 모달
     function openPaceModal(id) {
-      const workout = workouts.find(w => w.id === id);
+      const workout = workouts.find(w => w.id == id);
       if (!workout) return;
       
       const modal = document.createElement('div');
@@ -1355,17 +1365,24 @@
         
         if (response.ok) {
           // 로컬 데이터 업데이트
-          const workout = workouts.find(w => w.id === id);
+          const workout = workouts.find(w => w.id == id); // == 사용 (타입 무관 비교)
           if (workout) {
             workout.correctedPace = pace;
             workout.intervalPace = intervalPace;
             workout.intervalHR = intervalHR ? parseInt(intervalHR) : null;
             workout.needsPaceCorrection = false;
+            workout.hasUserCorrection = true;
+          }
+          
+          // 인터벌 분석이 열려있으면 다시 로드해서 통계 업데이트
+          if (selectedActivity && selectedActivity.id == id) {
+            await reloadActivityDetail(id);
           }
         }
         
         closePaceModal();
         renderWorkouts();
+        updateDashboard();
         updatePredictedRaceTimes();
       } catch (error) {
         console.error('페이스 수정 저장 실패:', error);
@@ -1379,7 +1396,7 @@
           credentials: 'include'
         });
         
-        const workout = workouts.find(w => w.id === id);
+        const workout = workouts.find(w => w.id == id); // == 사용
         if (workout) {
           workout.correctedPace = null;
           workout.intervalPace = null;
@@ -1389,9 +1406,15 @@
           workout.hasUserCorrection = false;
         }
         
+        // 인터벌 분석이 열려있으면 다시 로드
+        if (selectedActivity && selectedActivity.id == id) {
+          await reloadActivityDetail(id);
+        }
+        
         closePaceModal();
         renderWorkouts();
         updateDashboard();
+        updatePredictedRaceTimes();
       } catch (error) {
         console.error('페이스 수정 초기화 실패:', error);
       }
@@ -1399,7 +1422,7 @@
     
     // === 훈련 분류 변경 모달 ===
     function openTypeModal(id) {
-      const workout = workouts.find(w => w.id === id);
+      const workout = workouts.find(w => w.id == id);
       if (!workout) return;
       
       const types = [
@@ -1501,7 +1524,7 @@
         });
         
         if (response.ok) {
-          const workout = workouts.find(w => w.id === id);
+          const workout = workouts.find(w => w.id == id); // == 사용 (타입 무관 비교)
           if (workout) {
             workout.type = type;
             workout.subType = type === 'sub-t' ? subType : null;
@@ -1519,7 +1542,7 @@
     }
     
     async function resetToAutoType(id) {
-      const workout = workouts.find(w => w.id === id);
+      const workout = workouts.find(w => w.id == id);
       if (!workout || !workout.autoType) return;
       
       try {
@@ -1945,7 +1968,7 @@
     
     function savePace(id) {
       const input = document.getElementById('paceInput-' + id);
-      const workout = workouts.find(w => w.id === id);
+      const workout = workouts.find(w => w.id == id);
       if (workout && input) {
         workout.avgPace = input.value;
         workout.needsPaceCorrection = false;

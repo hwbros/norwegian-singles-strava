@@ -564,14 +564,27 @@ function analyzeLaps(laps, activity, lapCorrections = {}) {
   
   // 4단계: 랩 분류
   const analyzedLaps = lapData.map((lap, index) => {
-    // 사용자가 수동으로 수정한 분류가 있으면 우선 적용
+    // 사용자가 수동으로 수정한 데이터 확인
     const correction = lapCorrections[lap.lap] || {};
+    
+    // 페이스가 수정되었으면 적용 (type 수정 여부와 무관하게)
+    let correctedPace = lap.pace;
+    let correctedPaceFormatted = lap.paceFormatted;
+    let correctedPaceSeconds = lap.paceSeconds;
+    
+    if (correction.pace) {
+      correctedPace = parsePaceToSeconds(correction.pace);
+      correctedPaceFormatted = correction.pace;
+      correctedPaceSeconds = correctedPace;
+    }
+    
+    // 분류가 수동으로 지정되었으면 바로 반환
     if (correction.type) {
       return {
         ...lap,
-        pace: correction.pace ? parsePaceToSeconds(correction.pace) : lap.pace,
-        paceFormatted: correction.pace || lap.paceFormatted,
-        paceSeconds: correction.pace ? parsePaceToSeconds(correction.pace) : lap.paceSeconds,
+        pace: correctedPace,
+        paceFormatted: correctedPaceFormatted,
+        paceSeconds: correctedPaceSeconds,
         type: correction.type,
         userCorrected: true
       };
@@ -625,9 +638,11 @@ function analyzeLaps(laps, activity, lapCorrections = {}) {
     
     return {
       ...lap,
-      paceFormatted: lap.paceFormatted,
+      pace: correctedPace,
+      paceFormatted: correctedPaceFormatted,
+      paceSeconds: correctedPaceSeconds,
       type: lapType,
-      userCorrected: false
+      userCorrected: !!correction.pace // 페이스만 수정해도 userCorrected
     };
   });
   
