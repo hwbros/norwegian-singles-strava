@@ -888,6 +888,7 @@
     let loadingActivity = null;
     let userMaxHR = 190; // 사용자 최대 심박수 (기본값)
     let userRestingHR = 60; // 사용자 안정 심박수 (기본값)
+    let supabaseConnected = false; // Supabase 연결 상태
 
     // ===== 사용자 설정 =====
     
@@ -897,11 +898,15 @@
           credentials: 'include'
         });
         const data = await response.json();
+        console.log('[Settings] Load result:', data);
         
         if (data.success && data.settings) {
           userMaxHR = data.settings.maxHR || 190;
           userRestingHR = data.settings.restingHR || 60;
         }
+        
+        supabaseConnected = data.supabaseConnected || false;
+        console.log('[Settings] Supabase connected:', supabaseConnected);
       } catch (error) {
         console.error('설정 로드 실패:', error);
       }
@@ -916,14 +921,29 @@
           body: JSON.stringify({ maxHR: maxHR, restingHR: restingHR })
         });
         
-        if (response.ok) {
+        const data = await response.json();
+        console.log('[Settings] Save result:', data);
+        
+        if (response.ok && data.success) {
           userMaxHR = maxHR;
           userRestingHR = restingHR;
+          
+          // Supabase 저장 여부 알림
+          if (data.savedToSupabase) {
+            console.log('[Settings] ✅ Saved to Supabase (synced across devices)');
+          } else {
+            console.warn('[Settings] ⚠️ Saved to session only (not synced)');
+            alert('설정이 임시 저장되었습니다.\n\nSupabase가 연결되지 않아 다른 기기와 동기화되지 않습니다.\n\n관리자에게 Supabase 설정을 확인해주세요.');
+          }
+          
           // 활동 다시 로드 (분류가 바뀔 수 있음)
           loadActivities();
+        } else {
+          alert('설정 저장 실패: ' + (data.error || '알 수 없는 오류'));
         }
       } catch (error) {
         console.error('설정 저장 실패:', error);
+        alert('설정 저장 중 오류가 발생했습니다.');
       }
     }
     
@@ -939,15 +959,23 @@
       const subTLow = calcHRZone(0.82, userMaxHR, userRestingHR);
       const subTHigh = calcHRZone(0.88, userMaxHR, userRestingHR);
       
+      const syncStatus = supabaseConnected 
+        ? '<span style="color: #22c55e;">✅ 클라우드 동기화 활성화</span>'
+        : '<span style="color: #f59e0b;">⚠️ 로컬 저장만 (동기화 안됨)</span>';
+      
       const modal = document.createElement('div');
       modal.className = 'modal-overlay';
       modal.id = 'settingsModal';
       modal.innerHTML = `
         <div class="modal" style="max-width: 450px;">
           <h2 style="margin-bottom: 8px;">⚙️ 설정</h2>
-          <p style="color: #94a3b8; margin-bottom: 24px; font-size: 14px;">
+          <p style="color: #94a3b8; margin-bottom: 16px; font-size: 14px;">
             훈련 분석에 사용되는 개인 설정을 변경합니다
           </p>
+          
+          <div style="margin-bottom: 20px; padding: 12px; background: rgba(30,41,59,0.5); border-radius: 8px; font-size: 13px;">
+            ${syncStatus}
+          </div>
           
           <div class="form-group">
             <label>최대 심박수 (MaxHR)</label>

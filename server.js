@@ -600,22 +600,87 @@ async function saveUserSettings(athleteId, settings, session) {
 // 사용자 설정 API
 app.get('/api/settings', async (req, res) => {
   const athleteId = req.session.strava?.athlete?.id;
+  console.log('[Settings GET] athleteId:', athleteId, 'supabase:', !!supabase);
+  
   const settings = await getUserSettings(athleteId, req.session);
-  res.json({ success: true, settings });
+  console.log('[Settings GET] result:', settings);
+  
+  res.json({ success: true, settings, athleteId: athleteId, supabaseConnected: !!supabase });
 });
 
 app.post('/api/settings', async (req, res) => {
   const athleteId = req.session.strava?.athlete?.id;
   const { maxHR, restingHR } = req.body;
   
+  console.log('[Settings POST] athleteId:', athleteId, 'supabase:', !!supabase);
+  console.log('[Settings POST] input:', { maxHR, restingHR });
+  
+  if (!athleteId) {
+    return res.status(401).json({ success: false, error: 'Not logged in' });
+  }
+  
   const settings = {
     maxHR: maxHR ? parseInt(maxHR) : 190,
     restingHR: restingHR ? parseInt(restingHR) : 60
   };
   
-  await saveUserSettings(athleteId, settings, req.session);
+  const result = await saveUserSettings(athleteId, settings, req.session);
+  console.log('[Settings POST] saved:', result);
   
-  res.json({ success: true, settings });
+  res.json({ success: true, settings, savedToSupabase: !!supabase });
+});
+
+// 설정 디버그 엔드포인트
+app.get('/api/settings/debug', async (req, res) => {
+  const athleteId = req.session.strava?.athlete?.id;
+  
+  let supabaseStatus = 'not configured';
+  let tableExists = false;
+  let savedData = null;
+  
+  if (supabase) {
+    supabaseStatus = 'connected';
+    try {
+      // 테이블 존재 여부 확인
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('*')
+        .limit(1);
+      
+      if (error) {
+        supabaseStatus = `table error: ${error.message}`;
+      } else {
+        tableExists = true;
+        
+        // 현재 사용자 데이터 조회
+        if (athleteId) {
+          const { data: userData, error: userError } = await supabase
+            .from('user_settings')
+            .select('*')
+            .eq('strava_athlete_id', athleteId)
+            .single();
+          
+          if (userError && userError.code !== 'PGRST116') {
+            savedData = { error: userError.message };
+          } else {
+            savedData = userData || 'no data for this user';
+          }
+        }
+      }
+    } catch (err) {
+      supabaseStatus = `exception: ${err.message}`;
+    }
+  }
+  
+  res.json({
+    athleteId,
+    supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT SET',
+    supabaseKey: process.env.SUPABASE_ANON_KEY ? 'SET' : 'NOT SET',
+    supabaseStatus,
+    tableExists,
+    savedData,
+    sessionSettings: req.session.userSettings || 'none'
+  });
 });
 
 // 보정 데이터 저장 (분류, 페이스 등)
