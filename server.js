@@ -5,12 +5,14 @@
  * 1. 인터벌/휴식 구간 자동 분리 (HR 존 기반)
  * 2. 트레드밀 페이스 수동 보정
  * 3. 훈련 일정 불일치 감지
+ * 4. Supabase 영구 저장 (기기 간 동기화)
  */
 
 const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +20,18 @@ const PORT = process.env.PORT || 3000;
 // Strava API 설정
 const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+
+// Supabase 설정
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  console.log('Supabase connected');
+} else {
+  console.log('Supabase not configured - using session storage (not persistent)');
+}
 
 // BASE_URL 결정 함수 (요청 시점에 동적으로 결정)
 function getBaseUrl(req) {
@@ -46,6 +60,7 @@ console.log('PORT:', PORT);
 console.log('isProduction:', isProduction);
 console.log('STRAVA_CLIENT_ID:', STRAVA_CLIENT_ID ? 'SET' : 'NOT SET');
 console.log('STRAVA_CLIENT_SECRET:', STRAVA_CLIENT_SECRET ? 'SET' : 'NOT SET');
+console.log('SUPABASE_URL:', SUPABASE_URL ? 'SET' : 'NOT SET');
 console.log('====================');
 
 // 미들웨어
@@ -245,6 +260,11 @@ app.get('/api/strava/activities', async (req, res) => {
   
   try {
     const perPage = parseInt(req.query.limit) || 30;
+    const athleteId = req.session.strava?.athlete?.id;
+    
+    // 사용자 설정 조회
+    const userSettings = await getUserSettings(athleteId, req.session);
+    const userMaxHR = userSettings.maxHR;
     
     const response = await fetch(
       `https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`,
@@ -256,7 +276,9 @@ app.get('/api/strava/activities', async (req, res) => {
     }
     
     const activities = await response.json();
-    const corrections = req.session.corrections || {};
+    
+    // 모든 활동의 correction을 한 번에 조회
+    const corrections = await getAllCorrections(athleteId, activities.map(a => a.id), req.session);
     
     const formatted = activities
       .filter(a => a.type === 'Run' || a.type === 'VirtualRun' || a.type === 'TrailRun')
@@ -268,7 +290,7 @@ app.get('/api/strava/activities', async (req, res) => {
                            name.includes('트레드밀') || 
                            name.includes('treadmill') ||
                            name.includes('러닝머신');
-        const autoType = classifyType(a);
+        const autoType = classifyType(a, userMaxHR);
         
         // 사용자가 수정한 분류가 있으면 우선 사용
         const workoutType = correction.type || autoType;
@@ -297,7 +319,7 @@ app.get('/api/strava/activities', async (req, res) => {
         };
       });
     
-    res.json({ success: true, activities: formatted });
+    res.json({ success: true, activities: formatted, userMaxHR: userMaxHR });
   } catch (error) {
     console.error('활동 조회 에러:', error);
     res.status(500).json({ error: '활동을 가져오는 중 오류가 발생했습니다.' });
@@ -313,6 +335,12 @@ app.get('/api/strava/activity/:id', async (req, res) => {
   }
   
   try {
+    const athleteId = req.session.strava?.athlete?.id;
+    
+    // 사용자 설정 조회
+    const userSettings = await getUserSettings(athleteId, req.session);
+    const userMaxHR = userSettings.maxHR;
+    
     const [activityRes, lapsRes] = await Promise.all([
       fetch(`https://www.strava.com/api/v3/activities/${req.params.id}`, 
         { headers: { 'Authorization': `Bearer ${token}` } }),
@@ -327,10 +355,11 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     const activity = await activityRes.json();
     const laps = lapsRes.ok ? await lapsRes.json() : [];
     
-    const correction = (req.session.corrections || {})[req.params.id] || {};
+    // Supabase 또는 세션에서 correction 조회
+    const correction = await getCorrection(athleteId, req.params.id, req.session);
     const lapCorrections = correction.laps || {};
     
-    const analysis = analyzeLaps(laps, activity, lapCorrections);
+    const analysis = analyzeLaps(laps, activity, lapCorrections, userMaxHR);
     
     res.json({
       success: true,
@@ -338,7 +367,7 @@ app.get('/api/strava/activity/:id', async (req, res) => {
         id: activity.id,
         name: activity.name,
         date: activity.start_date_local,
-        type: correction.type || classifyType(activity),
+        type: correction.type || classifyType(activity, userMaxHR),
         duration: Math.round(activity.moving_time / 60),
         distance: (activity.distance / 1000).toFixed(2),
         avgPace: formatPace(activity.average_speed),
@@ -350,7 +379,8 @@ app.get('/api/strava/activity/:id', async (req, res) => {
       intervalStats: analysis.intervalAnalysis,
       intervalSets: analysis.intervalSets || [],
       correction: correction,
-      lapCorrections: lapCorrections
+      lapCorrections: lapCorrections,
+      userMaxHR: userMaxHR
     });
   } catch (error) {
     console.error('활동 상세 조회 에러:', error);
@@ -358,79 +388,330 @@ app.get('/api/strava/activity/:id', async (req, res) => {
   }
 });
 
-// 보정 데이터 저장 (분류, 페이스 등)
-app.post('/api/strava/activity/:id/correction', (req, res) => {
-  const { id } = req.params;
-  const { type, subType, pace, intervalPace, intervalHR } = req.body;
+// ===== Supabase 헬퍼 함수 =====
+
+async function getAllCorrections(athleteId, activityIds, session) {
+  const corrections = {};
   
-  if (!req.session.corrections) {
-    req.session.corrections = {};
+  // Supabase가 설정되어 있으면 Supabase에서 조회
+  if (supabase && athleteId && activityIds.length > 0) {
+    try {
+      const { data, error } = await supabase
+        .from('corrections')
+        .select('*')
+        .eq('strava_athlete_id', athleteId)
+        .in('activity_id', activityIds);
+      
+      if (error) {
+        console.error('Supabase 일괄 조회 에러:', error);
+      } else if (data) {
+        data.forEach(row => {
+          corrections[row.activity_id] = {
+            type: row.type,
+            subType: row.sub_type,
+            pace: row.pace,
+            intervalPace: row.interval_pace,
+            intervalHR: row.interval_hr,
+            laps: row.laps || {}
+          };
+        });
+      }
+    } catch (err) {
+      console.error('Supabase getAllCorrections 에러:', err);
+    }
   }
   
-  // 기존 데이터와 병합
-  const existing = req.session.corrections[id] || {};
-  req.session.corrections[id] = {
+  // 세션의 corrections도 병합 (Supabase 결과가 우선)
+  const sessionCorrections = session.corrections || {};
+  activityIds.forEach(id => {
+    if (!corrections[id] && sessionCorrections[id]) {
+      corrections[id] = sessionCorrections[id];
+    }
+  });
+  
+  return corrections;
+}
+
+async function getCorrection(athleteId, activityId, session) {
+  // Supabase가 설정되어 있으면 Supabase에서 조회
+  if (supabase && athleteId) {
+    try {
+      const { data, error } = await supabase
+        .from('corrections')
+        .select('*')
+        .eq('strava_athlete_id', athleteId)
+        .eq('activity_id', activityId)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Supabase 조회 에러:', error);
+      }
+      
+      if (data) {
+        return {
+          type: data.type,
+          subType: data.sub_type,
+          pace: data.pace,
+          intervalPace: data.interval_pace,
+          intervalHR: data.interval_hr,
+          laps: data.laps || {}
+        };
+      }
+    } catch (err) {
+      console.error('Supabase getCorrection 에러:', err);
+    }
+  }
+  
+  // 폴백: 세션에서 조회
+  return (session.corrections || {})[activityId] || {};
+}
+
+async function saveCorrection(athleteId, activityId, correctionData, session) {
+  // Supabase가 설정되어 있으면 Supabase에 저장
+  if (supabase && athleteId) {
+    try {
+      const { data, error } = await supabase
+        .from('corrections')
+        .upsert({
+          strava_athlete_id: athleteId,
+          activity_id: activityId,
+          type: correctionData.type,
+          sub_type: correctionData.subType,
+          pace: correctionData.pace,
+          interval_pace: correctionData.intervalPace,
+          interval_hr: correctionData.intervalHR,
+          laps: correctionData.laps || {}
+        }, {
+          onConflict: 'strava_athlete_id,activity_id'
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Supabase 저장 에러:', error);
+      } else {
+        console.log('Supabase 저장 성공:', activityId);
+        return data;
+      }
+    } catch (err) {
+      console.error('Supabase saveCorrection 에러:', err);
+    }
+  }
+  
+  // 폴백: 세션에 저장
+  if (!session.corrections) {
+    session.corrections = {};
+  }
+  session.corrections[activityId] = correctionData;
+  return correctionData;
+}
+
+async function deleteCorrection(athleteId, activityId, session) {
+  // Supabase가 설정되어 있으면 Supabase에서 삭제
+  if (supabase && athleteId) {
+    try {
+      const { error } = await supabase
+        .from('corrections')
+        .delete()
+        .eq('strava_athlete_id', athleteId)
+        .eq('activity_id', activityId);
+      
+      if (error) {
+        console.error('Supabase 삭제 에러:', error);
+      } else {
+        console.log('Supabase 삭제 성공:', activityId);
+      }
+    } catch (err) {
+      console.error('Supabase deleteCorrection 에러:', err);
+    }
+  }
+  
+  // 세션에서도 삭제
+  if (session.corrections) {
+    delete session.corrections[activityId];
+  }
+}
+
+// ===== 사용자 설정 헬퍼 함수 =====
+
+async function getUserSettings(athleteId, session) {
+  const defaults = { maxHR: 190, restingHR: 60 };
+  
+  // Supabase가 설정되어 있으면 Supabase에서 조회
+  if (supabase && athleteId) {
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('strava_athlete_id', athleteId)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') {
+        console.error('Supabase 설정 조회 에러:', error);
+      }
+      
+      if (data) {
+        return {
+          maxHR: data.max_hr || defaults.maxHR,
+          restingHR: data.resting_hr || defaults.restingHR
+        };
+      }
+    } catch (err) {
+      console.error('Supabase getUserSettings 에러:', err);
+    }
+  }
+  
+  // 폴백: 세션에서 조회
+  return session.userSettings || defaults;
+}
+
+async function saveUserSettings(athleteId, settings, session) {
+  // Supabase가 설정되어 있으면 Supabase에 저장
+  if (supabase && athleteId) {
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .upsert({
+          strava_athlete_id: athleteId,
+          max_hr: settings.maxHR,
+          resting_hr: settings.restingHR
+        }, {
+          onConflict: 'strava_athlete_id'
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Supabase 설정 저장 에러:', error);
+      } else {
+        console.log('Supabase 설정 저장 성공');
+        return data;
+      }
+    } catch (err) {
+      console.error('Supabase saveUserSettings 에러:', err);
+    }
+  }
+  
+  // 폴백: 세션에 저장
+  session.userSettings = settings;
+  return settings;
+}
+
+// 사용자 설정 API
+app.get('/api/settings', async (req, res) => {
+  const athleteId = req.session.strava?.athlete?.id;
+  const settings = await getUserSettings(athleteId, req.session);
+  res.json({ success: true, settings });
+});
+
+app.post('/api/settings', async (req, res) => {
+  const athleteId = req.session.strava?.athlete?.id;
+  const { maxHR, restingHR } = req.body;
+  
+  const settings = {
+    maxHR: maxHR ? parseInt(maxHR) : 190,
+    restingHR: restingHR ? parseInt(restingHR) : 60
+  };
+  
+  await saveUserSettings(athleteId, settings, req.session);
+  
+  res.json({ success: true, settings });
+});
+
+// 보정 데이터 저장 (분류, 페이스 등)
+app.post('/api/strava/activity/:id/correction', async (req, res) => {
+  const { id } = req.params;
+  const { type, subType, pace, intervalPace, intervalHR } = req.body;
+  const athleteId = req.session.strava?.athlete?.id;
+  
+  // 기존 데이터 조회
+  const existing = await getCorrection(athleteId, id, req.session);
+  
+  // 병합
+  const correctionData = {
     ...existing,
     type: type !== undefined ? type : existing.type,
     subType: subType !== undefined ? subType : existing.subType,
     pace: pace !== undefined ? pace : existing.pace,
     intervalPace: intervalPace !== undefined ? intervalPace : existing.intervalPace,
     intervalHR: intervalHR !== undefined ? (intervalHR ? parseInt(intervalHR) : null) : existing.intervalHR,
-    updatedAt: new Date().toISOString()
+    laps: existing.laps || {}
   };
   
-  res.json({ success: true, correction: req.session.corrections[id] });
+  await saveCorrection(athleteId, id, correctionData, req.session);
+  
+  res.json({ success: true, correction: correctionData });
 });
 
-app.delete('/api/strava/activity/:id/correction', (req, res) => {
-  if (req.session.corrections) {
-    delete req.session.corrections[req.params.id];
-  }
+app.delete('/api/strava/activity/:id/correction', async (req, res) => {
+  const athleteId = req.session.strava?.athlete?.id;
+  await deleteCorrection(athleteId, req.params.id, req.session);
   res.json({ success: true });
 });
 
 // 랩별 수정 API
-app.post('/api/strava/activity/:id/lap/:lapNum/correction', (req, res) => {
+app.post('/api/strava/activity/:id/lap/:lapNum/correction', async (req, res) => {
   const { id, lapNum } = req.params;
   const { type, pace } = req.body;
+  const athleteId = req.session.strava?.athlete?.id;
   
-  if (!req.session.corrections) {
-    req.session.corrections = {};
-  }
+  // 기존 데이터 조회
+  const existing = await getCorrection(athleteId, id, req.session);
   
-  if (!req.session.corrections[id]) {
-    req.session.corrections[id] = {};
-  }
-  
-  if (!req.session.corrections[id].laps) {
-    req.session.corrections[id].laps = {};
-  }
-  
-  req.session.corrections[id].laps[lapNum] = {
+  // 랩 수정 추가
+  const laps = existing.laps || {};
+  laps[lapNum] = {
     type: type || null,
-    pace: pace || null,
-    updatedAt: new Date().toISOString()
+    pace: pace || null
   };
   
-  res.json({ success: true, lapCorrection: req.session.corrections[id].laps[lapNum] });
+  const correctionData = {
+    ...existing,
+    laps: laps
+  };
+  
+  await saveCorrection(athleteId, id, correctionData, req.session);
+  
+  res.json({ success: true, lapCorrection: laps[lapNum] });
 });
 
-app.delete('/api/strava/activity/:id/lap/:lapNum/correction', (req, res) => {
+app.delete('/api/strava/activity/:id/lap/:lapNum/correction', async (req, res) => {
   const { id, lapNum } = req.params;
+  const athleteId = req.session.strava?.athlete?.id;
   
-  if (req.session.corrections?.[id]?.laps) {
-    delete req.session.corrections[id].laps[lapNum];
-  }
+  // 기존 데이터 조회
+  const existing = await getCorrection(athleteId, id, req.session);
+  
+  // 랩 수정 삭제
+  const laps = existing.laps || {};
+  delete laps[lapNum];
+  
+  const correctionData = {
+    ...existing,
+    laps: laps
+  };
+  
+  await saveCorrection(athleteId, id, correctionData, req.session);
+  
   res.json({ success: true });
 });
 
 // 모든 랩 수정 초기화
-app.delete('/api/strava/activity/:id/laps/correction', (req, res) => {
+app.delete('/api/strava/activity/:id/laps/correction', async (req, res) => {
   const { id } = req.params;
+  const athleteId = req.session.strava?.athlete?.id;
   
-  if (req.session.corrections?.[id]) {
-    req.session.corrections[id].laps = {};
-  }
+  // 기존 데이터 조회
+  const existing = await getCorrection(athleteId, id, req.session);
+  
+  // 랩 수정만 초기화
+  const correctionData = {
+    ...existing,
+    laps: {}
+  };
+  
+  await saveCorrection(athleteId, id, correctionData, req.session);
+  
   res.json({ success: true });
 });
 
@@ -519,12 +800,10 @@ app.get('/api/schedule/analysis', async (req, res) => {
 
 // ===== 헬퍼 함수 =====
 
-function analyzeLaps(laps, activity, lapCorrections = {}) {
+function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
   if (!laps || laps.length === 0) {
     return { laps: [], intervalAnalysis: null, intervalSets: [] };
   }
-  
-  const userMaxHR = 190; // 사용자 최대 심박수
   
   // 1단계: 기본 데이터 추출
   const lapData = laps.map((lap, index) => {
@@ -756,13 +1035,11 @@ function parsePaceToSeconds(paceStr) {
   return 0;
 }
 
-function classifyType(a) {
+function classifyType(a, userMaxHR = 190) {
   const duration = a.moving_time / 60;
   const avgHR = a.average_heartrate;
   const pace = a.average_speed ? 1000 / a.average_speed : 0; // 초/km
   
-  // 사용자 MaxHR - 고정값 190 사용 (운동의 max_heartrate가 아님!)
-  const userMaxHR = 190;
   const hrPercent = avgHR ? (avgHR / userMaxHR) * 100 : 0;
   
   // 0. 매우 짧은 활동 (15분 미만) → 워밍업/쿨다운으로 간주

@@ -886,6 +886,165 @@
     let editingWorkout = null;
     let selectedActivity = null;
     let loadingActivity = null;
+    let userMaxHR = 190; // 사용자 최대 심박수 (기본값)
+    let userRestingHR = 60; // 사용자 안정 심박수 (기본값)
+
+    // ===== 사용자 설정 =====
+    
+    async function loadUserSettings() {
+      try {
+        const response = await fetch(`${API_BASE}/api/settings`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.success && data.settings) {
+          userMaxHR = data.settings.maxHR || 190;
+          userRestingHR = data.settings.restingHR || 60;
+        }
+      } catch (error) {
+        console.error('설정 로드 실패:', error);
+      }
+    }
+    
+    async function saveUserSettings(maxHR, restingHR) {
+      try {
+        const response = await fetch(`${API_BASE}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ maxHR: maxHR, restingHR: restingHR })
+        });
+        
+        if (response.ok) {
+          userMaxHR = maxHR;
+          userRestingHR = restingHR;
+          // 활동 다시 로드 (분류가 바뀔 수 있음)
+          loadActivities();
+        }
+      } catch (error) {
+        console.error('설정 저장 실패:', error);
+      }
+    }
+    
+    // Karvonen 공식으로 HR 존 계산
+    function calcHRZone(intensity, maxHR, restingHR) {
+      const hrReserve = maxHR - restingHR;
+      return Math.round(restingHR + (hrReserve * intensity));
+    }
+    
+    function openSettingsModal() {
+      const hrReserve = userMaxHR - userRestingHR;
+      const easyHR = calcHRZone(0.70, userMaxHR, userRestingHR);
+      const subTLow = calcHRZone(0.82, userMaxHR, userRestingHR);
+      const subTHigh = calcHRZone(0.88, userMaxHR, userRestingHR);
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.id = 'settingsModal';
+      modal.innerHTML = `
+        <div class="modal" style="max-width: 450px;">
+          <h2 style="margin-bottom: 8px;">⚙️ 설정</h2>
+          <p style="color: #94a3b8; margin-bottom: 24px; font-size: 14px;">
+            훈련 분석에 사용되는 개인 설정을 변경합니다
+          </p>
+          
+          <div class="form-group">
+            <label>최대 심박수 (MaxHR)</label>
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <input type="number" class="form-input" id="settingsMaxHR" 
+                value="${userMaxHR}" min="140" max="220" style="flex: 1;">
+              <span style="color: #94a3b8;">bpm</span>
+            </div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 8px;">
+              일반적으로 220 - 나이로 추정합니다.
+            </div>
+          </div>
+          
+          <div class="form-group" style="margin-top: 16px;">
+            <label>안정 심박수 (Resting HR)</label>
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <input type="number" class="form-input" id="settingsRestingHR" 
+                value="${userRestingHR}" min="30" max="100" style="flex: 1;">
+              <span style="color: #94a3b8;">bpm</span>
+            </div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 8px;">
+              아침에 깨어났을 때 측정한 심박수입니다.
+            </div>
+          </div>
+          
+          <div id="hrZonePreview" style="margin-top: 16px; padding: 16px; background: rgba(59,130,246,0.1); border-radius: 12px;">
+            <div style="font-weight: 600; color: #60a5fa; margin-bottom: 8px;">💡 HR 존 (Karvonen 공식)</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.8;">
+              • HR Reserve: <strong style="color: #fbbf24;">${hrReserve}bpm</strong> (MaxHR - RestingHR)<br>
+              • Easy (70%): &lt; <strong>${easyHR}bpm</strong><br>
+              • Sub-T (82-88%): <strong>${subTLow}-${subTHigh}bpm</strong>
+            </div>
+          </div>
+          
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" style="flex: 1;" onclick="saveSettingsAndClose()">
+              저장
+            </button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeSettingsModal()">
+              취소
+            </button>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+      
+      // HR 존 미리보기 업데이트
+      const updatePreview = () => {
+        const newMaxHR = parseInt(document.getElementById('settingsMaxHR').value) || 190;
+        const newRestingHR = parseInt(document.getElementById('settingsRestingHR').value) || 60;
+        const newHRReserve = newMaxHR - newRestingHR;
+        const newEasyHR = calcHRZone(0.70, newMaxHR, newRestingHR);
+        const newSubTLow = calcHRZone(0.82, newMaxHR, newRestingHR);
+        const newSubTHigh = calcHRZone(0.88, newMaxHR, newRestingHR);
+        
+        document.getElementById('hrZonePreview').innerHTML = `
+          <div style="font-weight: 600; color: #60a5fa; margin-bottom: 8px;">💡 HR 존 미리보기 (Karvonen 공식)</div>
+          <div style="font-size: 13px; color: #94a3b8; line-height: 1.8;">
+            • HR Reserve: <strong style="color: #fbbf24;">${newHRReserve}bpm</strong> (MaxHR - RestingHR)<br>
+            • Easy (70%): &lt; <strong>${newEasyHR}bpm</strong><br>
+            • Sub-T (82-88%): <strong>${newSubTLow}-${newSubTHigh}bpm</strong>
+          </div>
+        `;
+      };
+      
+      document.getElementById('settingsMaxHR').addEventListener('input', updatePreview);
+      document.getElementById('settingsRestingHR').addEventListener('input', updatePreview);
+    }
+    
+    function closeSettingsModal() {
+      const modal = document.getElementById('settingsModal');
+      if (modal) modal.remove();
+    }
+    
+    function saveSettingsAndClose() {
+      const maxHR = parseInt(document.getElementById('settingsMaxHR').value) || 190;
+      const restingHR = parseInt(document.getElementById('settingsRestingHR').value) || 60;
+      
+      if (maxHR < 140 || maxHR > 220) {
+        alert('최대 심박수는 140-220 사이로 입력해주세요.');
+        return;
+      }
+      
+      if (restingHR < 30 || restingHR > 100) {
+        alert('안정 심박수는 30-100 사이로 입력해주세요.');
+        return;
+      }
+      
+      if (restingHR >= maxHR) {
+        alert('안정 심박수는 최대 심박수보다 낮아야 합니다.');
+        return;
+      }
+      
+      saveUserSettings(maxHR, restingHR);
+      closeSettingsModal();
+    }
 
     // ===== Authentication (Strava OAuth) =====
     
@@ -950,9 +1109,13 @@
         <div class="user-info">
           ${avatar ? `<img src="${avatar}" style="width: 40px; height: 40px; border-radius: 50%;">` : '<div class="user-avatar">👤</div>'}
           <span class="user-name">${name}</span>
+          <button class="btn" onclick="openSettingsModal()" style="padding: 8px 16px; background: rgba(100,116,139,0.3);">⚙️ 설정</button>
           <button class="btn btn-danger" onclick="logout()" style="padding: 8px 16px;">연결 해제</button>
         </div>
       `;
+      
+      // 사용자 설정 로드
+      loadUserSettings();
     }
 
     // ===== Data Loading =====

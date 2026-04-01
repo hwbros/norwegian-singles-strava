@@ -88,13 +88,107 @@ Client Secret: abcdef1234567890... (긴 문자열)
 
 스크롤을 내려 **Environment Variables** 섹션에서:
 
-**Add Environment Variable** 을 3번 클릭해서 추가:
+**Add Environment Variable** 을 클릭해서 추가:
 
-| Key | Value |
-|-----|-------|
-| `SESSION_SECRET` | `mynorwegiansecret123` (아무 문자열) |
-| `STRAVA_CLIENT_ID` | Strava에서 복사한 Client ID (숫자) |
-| `STRAVA_CLIENT_SECRET` | Strava에서 복사한 Client Secret |
+| Key | Value | 필수 |
+|-----|-------|------|
+| `SESSION_SECRET` | `mynorwegiansecret123` (아무 문자열) | ✅ |
+| `STRAVA_CLIENT_ID` | Strava에서 복사한 Client ID (숫자) | ✅ |
+| `STRAVA_CLIENT_SECRET` | Strava에서 복사한 Client Secret | ✅ |
+| `SUPABASE_URL` | Supabase Project URL | ⭐ 권장 |
+| `SUPABASE_ANON_KEY` | Supabase anon public 키 | ⭐ 권장 |
+
+> ⭐ **Supabase 연동**: 수정 데이터를 영구 저장하려면 Supabase 설정이 필요합니다.
+> 설정하지 않으면 세션 기반 임시 저장으로 동작합니다 (서버 재시작 시 손실).
+
+---
+
+## 💾 Supabase 설정 (선택사항 - 영구 저장용)
+
+수정한 분류/페이스를 PC와 스마트폰에서 공유하려면 Supabase를 설정하세요.
+
+### STEP 1: Supabase 프로젝트 생성
+
+1. https://supabase.com 접속 → 무료 계정 생성/로그인
+2. **New Project** 클릭
+3. 프로젝트 이름: `norwegian-strava`
+4. 데이터베이스 비밀번호 설정
+5. Region: `Northeast Asia (Tokyo)` 선택
+6. **Create new project** 클릭
+
+### STEP 2: 테이블 생성
+
+Supabase 대시보드 → **SQL Editor** → **New query**에서 아래 SQL 실행:
+
+```sql
+-- 수정 데이터 저장 테이블
+CREATE TABLE corrections (
+  id SERIAL PRIMARY KEY,
+  strava_athlete_id BIGINT NOT NULL,
+  activity_id BIGINT NOT NULL,
+  type VARCHAR(50),
+  sub_type VARCHAR(50),
+  pace VARCHAR(20),
+  interval_pace VARCHAR(20),
+  interval_hr INTEGER,
+  laps JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(strava_athlete_id, activity_id)
+);
+
+-- 사용자 설정 테이블
+CREATE TABLE user_settings (
+  id SERIAL PRIMARY KEY,
+  strava_athlete_id BIGINT NOT NULL UNIQUE,
+  max_hr INTEGER DEFAULT 190,
+  resting_hr INTEGER DEFAULT 60,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 인덱스 생성
+CREATE INDEX idx_corrections_athlete ON corrections(strava_athlete_id);
+CREATE INDEX idx_corrections_activity ON corrections(strava_athlete_id, activity_id);
+CREATE INDEX idx_user_settings_athlete ON user_settings(strava_athlete_id);
+
+-- 업데이트 시 자동 타임스탬프
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER corrections_updated_at
+  BEFORE UPDATE ON corrections
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER user_settings_updated_at
+  BEFORE UPDATE ON user_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at();
+```
+
+**Run** 버튼 클릭하여 실행
+
+### STEP 3: API 키 복사
+
+Supabase 대시보드 → **Settings** (톱니바퀴) → **API**:
+
+1. **Project URL** 복사 → Render의 `SUPABASE_URL`에 입력
+2. **anon public** 키 복사 → Render의 `SUPABASE_ANON_KEY`에 입력
+
+### STEP 4: Render 환경 변수 추가
+
+Render 대시보드 → 서비스 → **Environment** 탭:
+
+- `SUPABASE_URL`: 복사한 Project URL
+- `SUPABASE_ANON_KEY`: 복사한 anon 키
+
+**Save Changes** 후 서비스 재배포
 
 ### STEP 5: 배포 시작
 
