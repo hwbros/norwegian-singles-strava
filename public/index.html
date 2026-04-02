@@ -2895,6 +2895,7 @@
           `;
           
           data.mismatches.forEach(m => {
+            const correctedBadge = m.userCorrected ? '<span style="font-size: 11px; color: #60a5fa; margin-left: 4px;">✏️</span>' : '';
             html += `
               <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(30,41,59,0.5); border-radius: 10px;">
                 <div style="min-width: 50px; font-weight: 600;">${m.date.slice(5)}</div>
@@ -2902,7 +2903,7 @@
                 <div style="flex: 1;">
                   <span style="color: #f87171; text-decoration: line-through;">${typeNames[m.recommended] || m.recommended}</span>
                   <span style="color: #64748b;"> → </span>
-                  <span style="color: #fbbf24;">${typeNames[m.actual] || m.actual}</span>
+                  <span style="color: #fbbf24;">${typeNames[m.actual] || m.actual}${correctedBadge}</span>
                 </div>
                 <div style="font-size: 12px; color: #64748b; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                   ${m.activityName}

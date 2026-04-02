@@ -811,12 +811,21 @@ app.get('/api/schedule/analysis', async (req, res) => {
   }
   
   try {
+    const athleteId = req.session.strava?.athlete?.id;
+    
+    // 사용자 설정 조회
+    const userSettings = await getUserSettings(athleteId, req.session);
+    const userMaxHR = userSettings.maxHR;
+    
     const response = await fetch(
       `https://www.strava.com/api/v3/athlete/activities?per_page=14`,
       { headers: { 'Authorization': `Bearer ${token}` } }
     );
     
     const activities = await response.json();
+    
+    // 모든 활동의 correction을 한 번에 조회
+    const corrections = await getAllCorrections(athleteId, activities.map(a => a.id), req.session);
     
     const today = new Date();
     const startOfWeek = new Date(today);
@@ -836,7 +845,13 @@ app.get('/api/schedule/analysis', async (req, res) => {
         if (activityDate >= startOfWeek && activityDate <= today) {
           const dayOfWeek = activityDate.getDay();
           const recommended = weeklyPattern[dayOfWeek];
-          const actual = classifyType(a);
+          
+          // 수동 수정된 분류가 있으면 우선 사용
+          const correction = corrections[a.id] || {};
+          const actual = correction.type || classifyType(a, userMaxHR);
+          
+          // warmup-cooldown은 비교에서 제외
+          if (actual === 'warmup-cooldown') return;
           
           if (recommended !== actual) {
             mismatches.push({
@@ -846,7 +861,8 @@ app.get('/api/schedule/analysis', async (req, res) => {
               recommended: recommended,
               actual: actual,
               activityName: a.name,
-              activityId: a.id
+              activityId: a.id,
+              userCorrected: !!correction.type
             });
           }
         }
