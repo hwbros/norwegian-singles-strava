@@ -349,6 +349,7 @@
         <button class="tab" data-tab="workouts" onclick="switchTab('workouts')">운동 기록</button>
         <button class="tab" data-tab="analysis" onclick="switchTab('analysis')">분석</button>
         <button class="tab" data-tab="calculator" onclick="switchTab('calculator')">계산기</button>
+        <button class="tab" data-tab="progress" onclick="switchTab('progress')">추세</button>
         <button class="tab" data-tab="guide" onclick="switchTab('guide')">가이드</button>
       </div>
 
@@ -620,6 +621,54 @@
               <div style="font-size: 12px; font-weight: 600; color: #22c55e;" id="paceEasyBar">6:45</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Progress Tab (주차별 예상 레이스 시간 추세) -->
+      <div id="progressTab" class="hidden">
+        <h2 style="font-size: 22px; font-weight: 600; margin-bottom: 20px;">📈 레이스 타임 추세</h2>
+
+        <!-- 요약 카드 -->
+        <div id="progressSummary" class="card" style="display:none;">
+          <div class="card-title">🏆 최근 예측 vs 초기 예측</div>
+          <div id="progressSummaryContent"></div>
+        </div>
+
+        <!-- 차트 카드 -->
+        <div class="card" id="progressChartCard" style="display:none;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <div class="card-title" style="margin:0;">📊 주차별 예상 하프마라톤 페이스</div>
+            <div style="display:flex; gap:6px;">
+              <button onclick="setProgressMetric('hm')" id="btnMetricHM"
+                style="padding:4px 10px; border-radius:6px; border:1px solid rgba(245,158,11,0.5); background:rgba(245,158,11,0.2); color:#fbbf24; font-size:12px; cursor:pointer;">하프</button>
+              <button onclick="setProgressMetric('10k')" id="btnMetric10K"
+                style="padding:4px 10px; border-radius:6px; border:1px solid rgba(100,116,139,0.3); background:transparent; color:#94a3b8; font-size:12px; cursor:pointer;">10K</button>
+              <button onclick="setProgressMetric('5k')" id="btnMetric5K"
+                style="padding:4px 10px; border-radius:6px; border:1px solid rgba(100,116,139,0.3); background:transparent; color:#94a3b8; font-size:12px; cursor:pointer;">5K</button>
+              <button onclick="setProgressMetric('fm')" id="btnMetricFM"
+                style="padding:4px 10px; border-radius:6px; border:1px solid rgba(100,116,139,0.3); background:transparent; color:#94a3b8; font-size:12px; cursor:pointer;">풀코스</button>
+            </div>
+          </div>
+          <div id="progressChartContainer" style="overflow-x:auto;">
+            <div id="progressChart"></div>
+          </div>
+          <div style="font-size:11px; color:#64748b; margin-top:8px;">
+            ● 점: Sub-T 세션 있는 주차 &nbsp;○ 점: 세션 없어 이전 주 예측값 유지
+          </div>
+        </div>
+
+        <!-- 주차별 테이블 -->
+        <div class="card" id="progressTableCard" style="display:none;">
+          <div class="card-title">📋 주차별 예상 레이스 시간</div>
+          <div style="overflow-x:auto;">
+            <table id="progressTable" style="width:100%; border-collapse:collapse; font-size:13px;"></table>
+          </div>
+        </div>
+
+        <!-- 데이터 없음 -->
+        <div id="progressEmpty" class="card" style="display:none; text-align:center; padding:40px; color:#64748b;">
+          Sub-T 세션이 없으면 추세를 계산할 수 없습니다.<br>
+          Sub-T 훈련을 기록하면 자동으로 추세가 표시됩니다.
         </div>
       </div>
 
@@ -2150,13 +2199,16 @@
         t.classList.toggle('active', t.dataset.tab === tab);
       });
       
-      ['dashboard', 'recommend', 'workouts', 'analysis', 'calculator', 'guide'].forEach(t => {
+      ['dashboard', 'recommend', 'workouts', 'analysis', 'calculator', 'progress', 'guide'].forEach(t => {
         document.getElementById(t + 'Tab').classList.toggle('hidden', t !== tab);
       });
-      
+
       // 훈련 추천 탭 열 때 데이터 업데이트
       if (tab === 'recommend') {
         updateTrainingRecommendations();
+      }
+      if (tab === 'progress') {
+        renderProgressPage();
       }
     }
 
@@ -2469,6 +2521,355 @@
     // 기존 calculatePaces 함수 (호환성 유지)
     function calculatePaces() {
       calculateFromDistance('hm');
+    }
+
+    // ===== Progress Page =====
+
+    let progressMetric = 'hm'; // 현재 선택된 거리 지표
+
+    function setProgressMetric(metric) {
+      progressMetric = metric;
+      const btns = { hm: 'btnMetricHM', '10k': 'btnMetric10K', '5k': 'btnMetric5K', fm: 'btnMetricFM' };
+      const labels = { hm: '예상 하프마라톤 페이스', '10k': '예상 10K 페이스', '5k': '예상 5K 페이스', fm: '예상 풀코스 페이스' };
+      Object.entries(btns).forEach(([m, id]) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        const active = m === metric;
+        btn.style.background = active ? 'rgba(245,158,11,0.2)' : 'transparent';
+        btn.style.color      = active ? '#fbbf24' : '#94a3b8';
+        btn.style.border     = active ? '1px solid rgba(245,158,11,0.5)' : '1px solid rgba(100,116,139,0.3)';
+      });
+      const chartTitle = document.querySelector('#progressChartCard .card-title');
+      if (chartTitle) chartTitle.textContent = `📊 주차별 ${labels[metric]}`;
+      drawProgressChart(lastWeeklyData);
+    }
+
+    let lastWeeklyData = [];
+
+    // Sub-T 세션 목록 + 기준 날짜로 가중 HM 페이스 계산 (updatePredictedRaceTimes와 동일 로직)
+    function calcWeightedHMPace(sessions, asOfDate) {
+      const results = [];
+      sessions.forEach(w => {
+        const paceStr = w.intervalPace || w.correctedPace || w.avgPace;
+        const parts = (paceStr || '').split(':');
+        if (parts.length !== 2) return;
+        const rawPaceSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        if (!rawPaceSec || rawPaceSec <= 0 || rawPaceSec >= 600) return;
+
+        const subTypeCoeff = { short: 0.97, medium: 1.00, long: 1.03 }[w.subType] || 1.00;
+        let hmEquivPace = rawPaceSec / subTypeCoeff;
+
+        // HR 강도 보정
+        const hrValue = w.intervalHR || (w.avgHR ? Math.round(w.avgHR * 1.08) : null);
+        if (hrValue && userMaxHR > 0) {
+          const hrPct = (hrValue / userMaxHR) * 100;
+          const deviation = (hrPct - 85) / 100;
+          const hrFactor = Math.max(0.95, Math.min(1.05, 1 + deviation * 0.4));
+          hmEquivPace *= hrFactor;
+        }
+
+        // 최신성 가중치 (asOfDate 기준)
+        const daysSince = (asOfDate - new Date(w.date)) / 86400000;
+        if (daysSince < 0) return; // 미래 세션 제외
+        const recencyWeight = Math.exp(-daysSince / 28);
+
+        // 인터벌 볼륨 가중치
+        const setDurationMin = { short: 5, medium: 10, long: 12 }[w.subType] || 8;
+        const standardSets   = { short: 6, medium: 4,  long: 3  }[w.subType] || 4;
+        const workMin = Math.max(0, (w.duration || 0) - 12);
+        const volumeWeight = Math.min(1.3, Math.max(0.6, (workMin / setDurationMin) / standardSets));
+
+        // 데이터 품질 가중치
+        const qualityWeight = (!!(w.intervalPace || w.correctedPace) ? 1.2 : 0.75)
+                            * (!!(w.intervalHR) ? 1.15 : !!(w.avgHR) ? 0.95 : 0.75)
+                            * (!!(w.subType)    ? 1.05 : 0.90);
+
+        results.push({ hmEquivPace, weight: recencyWeight * volumeWeight * qualityWeight });
+      });
+
+      if (results.length === 0) return null;
+      const totalW = results.reduce((s, r) => s + r.weight, 0);
+      return results.reduce((s, r) => s + r.hmEquivPace * r.weight, 0) / totalW;
+    }
+
+    // 주차별 예측 데이터 생성
+    function buildWeeklyPredictions() {
+      const subTWorkouts = workouts.filter(w => w.type === 'sub-t' && w.avgPace && w.avgPace !== 'N/A');
+      if (subTWorkouts.length === 0) return [];
+
+      // 첫 Sub-T 세션이 있는 주의 월요일부터 이번 주까지
+      const allDates = subTWorkouts.map(w => new Date(w.date));
+      const minDate  = new Date(Math.min(...allDates));
+      const today    = new Date();
+
+      // minDate의 해당 주 월요일
+      const startMon = new Date(minDate);
+      startMon.setDate(minDate.getDate() - ((minDate.getDay() + 6) % 7));
+      startMon.setHours(0, 0, 0, 0);
+
+      const weekly = [];
+      const cursor = new Date(startMon);
+
+      while (cursor <= today) {
+        const weekStart = new Date(cursor);
+        const weekEnd   = new Date(cursor);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        const effectiveEnd = weekEnd > today ? today : weekEnd;
+
+        // 이 주까지의 모든 Sub-T 세션
+        const sessionsUpTo = subTWorkouts.filter(w => new Date(w.date) <= effectiveEnd);
+        // 이 주에 새로 있는 Sub-T 세션
+        const thisWeekSessions = subTWorkouts.filter(w => {
+          const d = new Date(w.date);
+          return d >= weekStart && d <= effectiveEnd;
+        });
+
+        if (sessionsUpTo.length > 0) {
+          const hmPace = calcWeightedHMPace(sessionsUpTo, effectiveEnd);
+          if (hmPace) {
+            const hmSec  = hmPace * 21.0975;
+            weekly.push({
+              weekStart: weekStart.toISOString().split('T')[0],
+              weekLabel: weekStart.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }),
+              hmPaceSec: hmPace,
+              hmSec,
+              fiveKSec:  convertRaceTime(hmSec, 21.0975, 5),
+              tenKSec:   convertRaceTime(hmSec, 21.0975, 10),
+              fmSec:     convertRaceTime(hmSec, 21.0975, 42.195),
+              hasSession: thisWeekSessions.length > 0,
+              sessionCount: thisWeekSessions.length,
+              totalSessions: sessionsUpTo.length,
+            });
+          }
+        }
+
+        cursor.setDate(cursor.getDate() + 7);
+      }
+
+      return weekly;
+    }
+
+    // SVG 라인 차트 그리기
+    function drawProgressChart(data) {
+      const container = document.getElementById('progressChart');
+      if (!container || !data || data.length === 0) return;
+
+      const metric = progressMetric;
+      const getVal = d => ({
+        hm:  d.hmSec,
+        '10k': d.tenKSec,
+        '5k': d.fiveKSec,
+        fm:  d.fmSec,
+      })[metric];
+
+      const values = data.map(getVal);
+      const minVal = Math.min(...values) * 0.995;
+      const maxVal = Math.max(...values) * 1.005;
+
+      const W = Math.max(400, data.length * 56);
+      const H = 220;
+      const padL = 52, padR = 16, padT = 16, padB = 36;
+      const chartW = W - padL - padR;
+      const chartH = H - padT - padB;
+
+      const xPos = i => padL + (i / Math.max(data.length - 1, 1)) * chartW;
+      // 값이 작을수록 (더 빠를수록) 위에 그림
+      const yPos = v => padT + chartH - ((v - minVal) / (maxVal - minVal || 1)) * chartH;
+
+      // Y축 눈금 (4개)
+      const yTicks = Array.from({ length: 5 }, (_, i) => minVal + (maxVal - minVal) * (i / 4));
+
+      let svg = `<svg width="${W}" height="${H}" style="font-family:inherit; overflow:visible;">`;
+
+      // 격자선 & Y축 레이블
+      yTicks.forEach(v => {
+        const y = yPos(v);
+        const label = metric === 'hm' || metric === 'fm'
+          ? formatTime(v)
+          : formatTime(v);
+        svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(100,116,139,0.2)" stroke-dasharray="3,3"/>`;
+        svg += `<text x="${padL - 4}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${label}</text>`;
+      });
+
+      // 개선 추세 배경 (첫 값 대비 마지막 값이 빠르면 녹색 그라데이션)
+      const improved = values[values.length - 1] < values[0];
+      const areaPoints = data.map((d, i) => `${xPos(i)},${yPos(getVal(d))}`).join(' ');
+      const areaPath = `M ${xPos(0)},${yPos(getVal(data[0]))} `
+        + data.map((d, i) => `L ${xPos(i)},${yPos(getVal(d))}`).join(' ')
+        + ` L ${xPos(data.length - 1)},${H - padB} L ${xPos(0)},${H - padB} Z`;
+      svg += `<defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${improved ? '#22c55e' : '#f59e0b'}" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="${improved ? '#22c55e' : '#f59e0b'}" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>`;
+      svg += `<path d="${areaPath}" fill="url(#areaGrad)"/>`;
+
+      // 라인
+      const linePts = data.map((d, i) => `${xPos(i)},${yPos(getVal(d))}`).join(' ');
+      svg += `<polyline points="${linePts}" fill="none" stroke="${improved ? '#22c55e' : '#f59e0b'}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+      // 데이터 포인트 & X축 레이블
+      data.forEach((d, i) => {
+        const x = xPos(i), y = yPos(getVal(d));
+        const isFirst = i === 0, isLast = i === data.length - 1;
+
+        // 포인트 (세션 있으면 채움, 없으면 빈 원)
+        if (d.hasSession) {
+          svg += `<circle cx="${x}" cy="${y}" r="5" fill="${improved ? '#22c55e' : '#fbbf24'}" stroke="#1e293b" stroke-width="1.5"/>`;
+        } else {
+          svg += `<circle cx="${x}" cy="${y}" r="4" fill="#1e293b" stroke="${improved ? '#22c55e' : '#f59e0b'}" stroke-width="1.5" stroke-dasharray="2,2"/>`;
+        }
+
+        // 첫/마지막 또는 세션 있는 주만 값 레이블 표시
+        if (isFirst || isLast || d.hasSession) {
+          const label = formatTime(getVal(d));
+          svg += `<text x="${x}" y="${y - 9}" text-anchor="middle" font-size="10" font-weight="${isLast ? '700' : '400'}" fill="${isLast ? (improved ? '#22c55e' : '#fbbf24') : '#94a3b8'}">${label}</text>`;
+        }
+
+        // X축 레이블 (첫/마지막 및 세션 있는 주)
+        if (isFirst || isLast || d.hasSession) {
+          svg += `<text x="${x}" y="${H - padB + 14}" text-anchor="middle" font-size="10" fill="#64748b">${d.weekLabel}</text>`;
+          if (d.hasSession) {
+            svg += `<text x="${x}" y="${H - padB + 24}" text-anchor="middle" font-size="9" fill="#fbbf24">(${d.sessionCount}세션)</text>`;
+          }
+        }
+      });
+
+      // 개선 화살표 (마지막 데이터 포인트 옆)
+      if (data.length >= 2) {
+        const diff = values[0] - values[values.length - 1]; // 양수 = 개선
+        if (Math.abs(diff) > 1) {
+          const lastX = xPos(data.length - 1);
+          const lastY = yPos(values[values.length - 1]);
+          const diffStr = diff > 0
+            ? `▲ ${formatTime(Math.abs(diff))} 단축`
+            : `▼ ${formatTime(Math.abs(diff))} 증가`;
+          const diffColor = diff > 0 ? '#22c55e' : '#f87171';
+          svg += `<text x="${lastX + 8}" y="${lastY + 4}" font-size="11" font-weight="700" fill="${diffColor}">${diffStr}</text>`;
+        }
+      }
+
+      svg += `</svg>`;
+      container.innerHTML = svg;
+      container.style.minWidth = `${W}px`;
+    }
+
+    // 주차별 테이블 렌더링
+    function renderProgressTable(data) {
+      const table = document.getElementById('progressTable');
+      if (!table) return;
+
+      let html = `<thead><tr style="border-bottom:1px solid rgba(100,116,139,0.3); font-size:12px; color:#64748b;">
+        <th style="padding:8px 6px; text-align:left;">주차</th>
+        <th style="padding:8px 6px; text-align:center;">세션</th>
+        <th style="padding:8px 6px; text-align:center; color:#fbbf24;">5K</th>
+        <th style="padding:8px 6px; text-align:center; color:#fbbf24;">10K</th>
+        <th style="padding:8px 6px; text-align:center; color:#fbbf24;">하프</th>
+        <th style="padding:8px 6px; text-align:center; color:#fbbf24;">풀코스</th>
+        <th style="padding:8px 6px; text-align:center;">HM 페이스</th>
+      </tr></thead><tbody>`;
+
+      const reversed = [...data].reverse();
+      reversed.forEach((d, i) => {
+        const isFirst  = i === reversed.length - 1;
+        const isLatest = i === 0;
+        const prevD    = reversed[i + 1];
+        const hmDiff   = prevD ? prevD.hmSec - d.hmSec : null; // 양수 = 개선
+        const trendIcon = hmDiff === null ? '' : hmDiff > 2 ? '▲' : hmDiff < -2 ? '▼' : '─';
+        const trendColor = hmDiff === null ? '' : hmDiff > 2 ? '#22c55e' : hmDiff < -2 ? '#f87171' : '#94a3b8';
+        const rowBg = isLatest ? 'rgba(245,158,11,0.08)' : 'transparent';
+
+        html += `<tr style="background:${rowBg}; border-bottom:1px solid rgba(100,116,139,0.1);">
+          <td style="padding:8px 6px; font-size:12px; color:${isLatest ? '#fbbf24' : '#94a3b8'};">
+            ${d.weekLabel}${isLatest ? ' <span style="font-size:10px; color:#fbbf24;">(최근)</span>' : ''}
+          </td>
+          <td style="padding:8px 6px; text-align:center; font-size:12px;">
+            ${d.hasSession ? `<span style="color:#fbbf24;">${d.sessionCount}회</span>` : '<span style="color:#475569;">-</span>'}
+          </td>
+          <td style="padding:8px 6px; text-align:center; font-weight:600;">${formatTime(d.fiveKSec)}</td>
+          <td style="padding:8px 6px; text-align:center; font-weight:600;">${formatTime(d.tenKSec)}</td>
+          <td style="padding:8px 6px; text-align:center; font-weight:600; color:${isLatest ? '#fbbf24' : 'inherit'};">${formatTime(d.hmSec)}</td>
+          <td style="padding:8px 6px; text-align:center; font-weight:600;">${formatTime(d.fmSec)}</td>
+          <td style="padding:8px 6px; text-align:center; font-size:12px;">
+            ${formatPace(d.hmPaceSec)}/km
+            ${trendIcon ? `<span style="color:${trendColor}; margin-left:4px;">${trendIcon}</span>` : ''}
+          </td>
+        </tr>`;
+      });
+
+      html += `</tbody>`;
+      table.innerHTML = html;
+    }
+
+    // 요약 카드 렌더링
+    function renderProgressSummary(data) {
+      const el = document.getElementById('progressSummaryContent');
+      const card = document.getElementById('progressSummary');
+      if (!el || !card || data.length < 2) { if (card) card.style.display = 'none'; return; }
+
+      const first  = data[0];
+      const latest = data[data.length - 1];
+      const hmDiff = first.hmSec - latest.hmSec;    // 양수 = 개선
+      const tenKDiff = first.tenKSec - latest.tenKSec;
+      const fiveKDiff = first.fiveKSec - latest.fiveKSec;
+
+      const sign = v => v > 2 ? `▲ ${formatTime(Math.abs(v))} 단축` : v < -2 ? `▼ ${formatTime(Math.abs(v))} 느려짐` : '변화 없음';
+      const col  = v => v > 2 ? '#22c55e' : v < -2 ? '#f87171' : '#94a3b8';
+
+      const totalWeeks = data.length;
+      const subTWeeks  = data.filter(d => d.hasSession).length;
+
+      el.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px;">
+          <div style="text-align:center; padding:12px; background:rgba(30,41,59,0.5); border-radius:10px;">
+            <div style="font-size:11px; color:#64748b; margin-bottom:4px;">5K 변화</div>
+            <div style="font-size:16px; font-weight:700; color:${col(fiveKDiff)}">${sign(fiveKDiff)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">${formatTime(first.fiveKSec)} → ${formatTime(latest.fiveKSec)}</div>
+          </div>
+          <div style="text-align:center; padding:12px; background:rgba(30,41,59,0.5); border-radius:10px;">
+            <div style="font-size:11px; color:#64748b; margin-bottom:4px;">10K 변화</div>
+            <div style="font-size:16px; font-weight:700; color:${col(tenKDiff)}">${sign(tenKDiff)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">${formatTime(first.tenKSec)} → ${formatTime(latest.tenKSec)}</div>
+          </div>
+          <div style="text-align:center; padding:12px; background:rgba(245,158,11,0.1); border-radius:10px; border:1px solid rgba(245,158,11,0.2);">
+            <div style="font-size:11px; color:#64748b; margin-bottom:4px;">하프 변화</div>
+            <div style="font-size:18px; font-weight:700; color:${col(hmDiff)}">${sign(hmDiff)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">${formatTime(first.hmSec)} → ${formatTime(latest.hmSec)}</div>
+          </div>
+        </div>
+        <div style="font-size:12px; color:#64748b; text-align:center;">
+          총 ${totalWeeks}주 기간 · Sub-T 세션 있는 주 ${subTWeeks}주 · 첫 세션: ${first.weekLabel}
+        </div>`;
+
+      card.style.display = 'block';
+    }
+
+    // 추세 페이지 메인 렌더
+    function renderProgressPage() {
+      const data = buildWeeklyPredictions();
+      lastWeeklyData = data;
+
+      const empty   = document.getElementById('progressEmpty');
+      const chart   = document.getElementById('progressChartCard');
+      const table   = document.getElementById('progressTableCard');
+
+      if (data.length === 0) {
+        if (empty)  empty.style.display  = 'block';
+        if (chart)  chart.style.display  = 'none';
+        if (table)  table.style.display  = 'none';
+        return;
+      }
+
+      if (empty)  empty.style.display  = 'none';
+      if (chart)  chart.style.display  = 'block';
+      if (table)  table.style.display  = 'block';
+
+      renderProgressSummary(data);
+      drawProgressChart(data);
+      renderProgressTable(data);
     }
 
     // ===== Training Recommendations =====
