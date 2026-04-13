@@ -866,6 +866,102 @@
           </div>
         </div>
 
+        <!-- 준수 점수 설명 -->
+        <div class="card">
+          <div class="card-title">🎯 Norwegian Singles 준수 점수 해설</div>
+          <div style="color: #cbd5e1; line-height: 1.8; margin-bottom: 20px;">
+            대시보드의 <strong style="color: #fbbf24;">준수 점수</strong>는 이번 주 훈련이 Norwegian Singles 원칙에 얼마나 잘 맞는지 0~100점으로 나타냅니다.
+            4개 항목을 각각 독립적으로 평가하며, 낮은 항목이 있으면 해당 부분을 집중적으로 개선하면 됩니다.
+          </div>
+
+          <div style="display: grid; gap: 16px;">
+            <!-- 주간 구조 -->
+            <div style="padding: 16px; background: rgba(245,158,11,0.08); border-radius: 12px; border-left: 4px solid #fbbf24;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 36px; height: 36px; background: rgba(245,158,11,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">📅</div>
+                <div>
+                  <div style="font-weight: 600; color: #fbbf24;">주간 구조 점수</div>
+                  <div style="font-size: 12px; color: #64748b;">Sub-T 2-3회 + Long 1회 조합 평가</div>
+                </div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+                  <div style="padding: 8px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                    <div style="color: #fbbf24; font-weight: 600; margin-bottom: 4px;">Sub-T 세션 (최대 40점)</div>
+                    <div>2회 이상 → <strong style="color: #22c55e;">40점</strong></div>
+                    <div>1회 → 20점</div>
+                    <div>0회 → 0점</div>
+                  </div>
+                  <div style="padding: 8px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                    <div style="color: #a78bfa; font-weight: 600; margin-bottom: 4px;">Long Run (최대 30점)</div>
+                    <div>1회 이상 → <strong style="color: #22c55e;">30점</strong></div>
+                    <div>0회 → 0점</div>
+                  </div>
+                </div>
+                <div style="padding: 8px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                  <div style="color: #22c55e; font-weight: 600; margin-bottom: 4px;">Easy Run (최대 30점)</div>
+                  <div>2회 이상 → <strong style="color: #22c55e;">30점</strong> / 1회 → 15점 / 0회 → 0점</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 퀄리티 볼륨 -->
+            <div style="padding: 16px; background: rgba(34,197,94,0.08); border-radius: 12px; border-left: 4px solid #22c55e;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 36px; height: 36px; background: rgba(34,197,94,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">📊</div>
+                <div>
+                  <div style="font-weight: 600; color: #22c55e;">퀄리티 볼륨 점수</div>
+                  <div style="font-size: 12px; color: #64748b;">주간 총 훈련 시간 중 Sub-T 비율 평가</div>
+                </div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                Sub-T 시간이 주간 전체 훈련 시간의 <strong style="color: #fbbf24;">20~25%</strong> 범위 안에 있으면 <strong style="color: #22c55e;">90점</strong>,
+                범위를 벗어나면 <strong style="color: #f87171;">70점</strong>으로 표시됩니다.
+                너무 적으면 훈련 자극이 부족하고, 너무 많으면 과부하 위험이 있습니다.
+              </div>
+            </div>
+
+            <!-- 이지런 강도 -->
+            <div style="padding: 16px; background: rgba(59,130,246,0.08); border-radius: 12px; border-left: 4px solid #60a5fa;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 36px; height: 36px; background: rgba(59,130,246,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">💙</div>
+                <div>
+                  <div style="font-weight: 600; color: #60a5fa;">이지런 강도 점수</div>
+                  <div style="font-size: 12px; color: #64748b;">Easy 세션이 HR 70% 미만으로 유지됐는지 평가</div>
+                </div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                Easy Run으로 분류된 세션 중 평균 HR이 <strong style="color: #fbbf24;">MaxHR의 70%를 초과</strong>한 세션 수에 따라 감점됩니다.
+                초과 세션 1회당 <strong style="color: #f87171;">-25점</strong> 감점되며,
+                모든 Easy를 진짜 쉽게 뛰면 <strong style="color: #22c55e;">100점</strong>입니다.
+              </div>
+            </div>
+
+            <!-- 일관성 -->
+            <div style="padding: 16px; background: rgba(139,92,246,0.08); border-radius: 12px; border-left: 4px solid #a78bfa;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 36px; height: 36px; background: rgba(139,92,246,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">🔄</div>
+                <div>
+                  <div style="font-weight: 600; color: #a78bfa;">일관성 점수</div>
+                  <div style="font-size: 12px; color: #64748b;">이번 주 총 훈련 횟수 평가</div>
+                </div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                이번 주 기록된 총 운동 수 × 15점으로 계산되며 <strong style="color: #fbbf24;">최대 100점</strong>입니다.
+                예: 주 7회 이상 운동하면 100점 달성. 일주일에 꾸준히 훈련할수록 높아집니다.
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 16px; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border-left: 4px solid #f59e0b;">
+            <strong style="color: #fbbf24;">💡 활용 팁:</strong>
+            <div style="font-size: 14px; color: #94a3b8; margin-top: 6px; line-height: 1.7;">
+              4개 점수를 함께 보세요. 예를 들어 <em>주간 구조는 높은데 이지런 강도가 낮다면</em> → Easy 세션 페이스를 낮추는 것이 우선 과제입니다.
+              모든 점수가 <strong style="color: #22c55e;">80점 이상</strong>이면 Norwegian Singles를 충실히 이행하고 있는 것입니다.
+            </div>
+          </div>
+        </div>
+
         <!-- 자주 묻는 질문 -->
         <div class="card">
           <div class="card-title">❓ 자주 묻는 질문</div>
