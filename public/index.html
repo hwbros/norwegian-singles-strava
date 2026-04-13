@@ -962,6 +962,124 @@
           </div>
         </div>
 
+        <!-- 예상 레이스 시간 산출 방식 -->
+        <div class="card">
+          <div class="card-title">🏁 예상 레이스 시간 산출 방식</div>
+          <div style="color: #cbd5e1; line-height: 1.8; margin-bottom: 20px;">
+            계산기의 <strong style="color: #fbbf24;">예상 레이스 타임</strong>은 최근 Sub-T 세션 데이터를 종합 분석하여 산출합니다.
+            단순 평균이 아닌 <strong style="color: #60a5fa;">4단계 보정 + 가중 평균</strong> 방식으로 현재 체력을 정확하게 반영합니다.
+          </div>
+
+          <div style="display: grid; gap: 16px;">
+
+            <!-- Step 1 -->
+            <div style="padding: 16px; background: rgba(245,158,11,0.08); border-radius: 12px; border-left: 4px solid #fbbf24;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: rgba(245,158,11,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fbbf24; flex-shrink: 0;">1</div>
+                <div style="font-weight: 600; color: #fbbf24;">기준 페이스 선택</div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                세션별로 <strong style="color: #cbd5e1;">인터벌 구간 페이스 → 수동 수정 페이스 → 전체 평균 페이스</strong> 순으로 신뢰도가 높은 값을 선택합니다.
+                워밍업·쿨다운이 포함된 전체 평균보다 실제 인터벌 구간 페이스가 체력을 더 정확히 반영하기 때문입니다.
+              </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div style="padding: 16px; background: rgba(59,130,246,0.08); border-radius: 12px; border-left: 4px solid #60a5fa;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: rgba(59,130,246,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #60a5fa; flex-shrink: 0;">2</div>
+                <div style="font-weight: 600; color: #60a5fa;">서브타입 계수 → HM 등가 페이스 변환</div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7; margin-bottom: 10px;">
+                인터벌 종류마다 목표 강도가 다르기 때문에 하프마라톤(HM) 등가 페이스로 통일합니다.
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px; text-align: center;">
+                  <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">짧은 인터벌</div>
+                  <div style="font-weight: 600; color: #fbbf24;">÷ 0.97</div>
+                  <div style="font-size: 11px; color: #64748b; margin-top: 4px;">HM보다 3% 빠름</div>
+                </div>
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px; text-align: center;">
+                  <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">중간 인터벌</div>
+                  <div style="font-weight: 600; color: #22c55e;">÷ 1.00</div>
+                  <div style="font-size: 11px; color: #64748b; margin-top: 4px;">HM 페이스 그대로</div>
+                </div>
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px; text-align: center;">
+                  <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">긴 인터벌</div>
+                  <div style="font-weight: 600; color: #a78bfa;">÷ 1.03</div>
+                  <div style="font-size: 11px; color: #64748b; margin-top: 4px;">HM보다 3% 느림</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div style="padding: 16px; background: rgba(239,68,68,0.08); border-radius: 12px; border-left: 4px solid #f87171;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: rgba(239,68,68,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #f87171; flex-shrink: 0;">3</div>
+                <div style="font-weight: 600; color: #f87171;">HR 강도 보정</div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                Sub-T 목표 강도는 <strong style="color: #fbbf24;">MaxHR의 85%</strong>(82–88% 중간값)입니다.
+                실제 HR이 목표보다 낮으면 여유가 있었다는 뜻이므로 HM 능력을 상향 보정하고,
+                높으면 과부하로 보아 보수적으로 보정합니다.
+              </div>
+              <div style="margin-top: 10px; padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px; font-size: 13px; color: #94a3b8;">
+                <div style="font-family: monospace; color: #cbd5e1;">HR 보정계수 = 1 + (실제HR% − 85%) × 0.004</div>
+                <div style="margin-top: 4px; color: #64748b;">편차 1%당 0.4% 페이스 조정 · 최대 ±5% 제한</div>
+              </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div style="padding: 16px; background: rgba(34,197,94,0.08); border-radius: 12px; border-left: 4px solid #22c55e;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: rgba(34,197,94,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #22c55e; flex-shrink: 0;">4</div>
+                <div style="font-weight: 600; color: #22c55e;">가중치 계산 (3가지 요소)</div>
+              </div>
+              <div style="display: grid; gap: 8px; font-size: 14px; color: #94a3b8;">
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                  <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">⏱ 최신성 가중치</div>
+                  <div>28일(4주) 반감기 지수 감쇠 적용. 최근 세션일수록 높은 가중치를 받습니다.</div>
+                  <div style="font-family: monospace; color: #60a5fa; margin-top: 4px; font-size: 12px;">가중치 = e^(−경과일수 / 28)</div>
+                </div>
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                  <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">📦 볼륨 가중치</div>
+                  <div>실제 완료한 세트 수를 추정하여 표준 세트 수 대비 비율로 계산합니다. (0.6~1.3 범위 제한)</div>
+                  <div style="font-size: 12px; color: #64748b; margin-top: 4px;">기준: 짧은 6세트 · 중간 4세트 · 긴 3세트</div>
+                </div>
+                <div style="padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                  <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">✅ 데이터 품질 가중치</div>
+                  <div>수동 수정 페이스(×1.2), 인터벌 HR(×1.15), 서브타입 지정(×1.05) 여부로 신뢰도를 반영합니다.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 5 -->
+            <div style="padding: 16px; background: rgba(139,92,246,0.08); border-radius: 12px; border-left: 4px solid #a78bfa;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: rgba(139,92,246,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #a78bfa; flex-shrink: 0;">5</div>
+                <div style="font-weight: 600; color: #a78bfa;">Riegel 공식으로 전 거리 변환</div>
+              </div>
+              <div style="font-size: 14px; color: #94a3b8; line-height: 1.7;">
+                가중 평균 HM 등가 페이스로 HM 예상 시간을 구한 뒤,
+                <strong style="color: #cbd5e1;">Riegel 공식</strong>으로 5K · 10K · 풀마라톤 시간을 계산합니다.
+              </div>
+              <div style="margin-top: 10px; padding: 10px; background: rgba(30,41,59,0.5); border-radius: 8px;">
+                <div style="font-family: monospace; color: #cbd5e1; font-size: 13px;">T₂ = T₁ × (D₂ / D₁)^1.06</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">지수 1.06은 거리가 늘어날수록 페이스가 떨어지는 피로 효과를 반영합니다.</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 16px; padding: 16px; background: rgba(245,158,11,0.1); border-radius: 12px; border-left: 4px solid #f59e0b;">
+            <strong style="color: #fbbf24;">💡 정확도를 높이려면:</strong>
+            <ul style="font-size: 14px; color: #94a3b8; margin-top: 8px; padding-left: 20px; line-height: 1.8;">
+              <li>운동 기록에서 <strong style="color: #cbd5e1;">인터벌 구간 페이스와 HR</strong>을 수동 수정하면 데이터 품질 가중치가 올라갑니다.</li>
+              <li>Sub-T 세션의 <strong style="color: #cbd5e1;">서브타입(짧은/중간/긴)</strong>을 지정하면 환산 계수가 정확해집니다.</li>
+              <li>예측은 <strong style="color: #cbd5e1;">최근 4주 데이터</strong>에 가장 큰 영향을 받습니다. 꾸준히 기록하세요.</li>
+            </ul>
+          </div>
+        </div>
+
         <!-- 자주 묻는 질문 -->
         <div class="card">
           <div class="card-title">❓ 자주 묻는 질문</div>
