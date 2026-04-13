@@ -360,7 +360,17 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     const lapCorrections = correction.laps || {};
     
     const analysis = analyzeLaps(laps, activity, lapCorrections, userMaxHR);
-    
+
+    // 랩 수정이 있으면 전체 평균 페이스를 수정된 랩 페이스 기반으로 재계산
+    let avgPace = formatPace(activity.average_speed);
+    if (analysis.hasLapCorrections && analysis.laps.length > 0) {
+      const totalDurSec = analysis.laps.reduce((sum, l) => sum + l.durationSeconds, 0);
+      const totalEffKm = analysis.laps.reduce((sum, l) => sum + (l.paceSeconds > 0 ? l.durationSeconds / l.paceSeconds : 0), 0);
+      if (totalEffKm > 0) {
+        avgPace = formatPaceFromSeconds(totalDurSec / totalEffKm);
+      }
+    }
+
     res.json({
       success: true,
       activity: {
@@ -370,7 +380,8 @@ app.get('/api/strava/activity/:id', async (req, res) => {
         type: correction.type || classifyType(activity, userMaxHR),
         duration: Math.round(activity.moving_time / 60),
         distance: (activity.distance / 1000).toFixed(2),
-        avgPace: formatPace(activity.average_speed),
+        avgPace: avgPace,
+        stravaAvgPace: formatPace(activity.average_speed),
         avgHR: activity.average_heartrate ? Math.round(activity.average_heartrate) : null,
         maxHR: activity.max_heartrate ? Math.round(activity.max_heartrate) : null,
         isTreadmill: activity.type === 'VirtualRun'
@@ -1035,6 +1046,7 @@ function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
           laps: [lap],
           totalDistance: parseFloat(lap.distance),
           totalDistanceMeters: lap.distanceMeters,
+          totalEffectiveKm: lap.paceSeconds > 0 ? lap.durationSeconds / lap.paceSeconds : parseFloat(lap.distance),
           totalDuration: lap.duration,
           totalDurationSeconds: lap.durationSeconds,
           paceSum: lap.paceSeconds,
@@ -1047,6 +1059,7 @@ function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
         currentSet.laps.push(lap);
         currentSet.totalDistance += parseFloat(lap.distance);
         currentSet.totalDistanceMeters += lap.distanceMeters;
+        currentSet.totalEffectiveKm += lap.paceSeconds > 0 ? lap.durationSeconds / lap.paceSeconds : parseFloat(lap.distance);
         currentSet.totalDuration += lap.duration;
         currentSet.totalDurationSeconds += lap.durationSeconds;
         currentSet.paceSum += lap.paceSeconds;
@@ -1058,9 +1071,9 @@ function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
     } else {
       // 인터벌이 아닌 랩 → 현재 세트 종료
       if (currentSet) {
-        // 세트 통계 계산
+        // 세트 통계 계산 (수정된 페이스 기반 유효 거리로 평균 페이스 계산)
         const lapCount = currentSet.laps.length;
-        currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / (currentSet.totalDistanceMeters / 1000);
+        currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / currentSet.totalEffectiveKm;
         currentSet.avgPace = formatPaceFromSeconds(currentSet.avgPaceSeconds);
         currentSet.avgHR = currentSet.hrCount > 0 ? Math.round(currentSet.hrSum / currentSet.hrCount) : null;
         currentSet.totalDistance = currentSet.totalDistance.toFixed(2);
@@ -1070,24 +1083,25 @@ function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
       }
     }
   });
-  
+
   // 마지막 세트 처리
   if (currentSet) {
     const lapCount = currentSet.laps.length;
-    currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / (currentSet.totalDistanceMeters / 1000);
+    currentSet.avgPaceSeconds = currentSet.totalDurationSeconds / currentSet.totalEffectiveKm;
     currentSet.avgPace = formatPaceFromSeconds(currentSet.avgPaceSeconds);
     currentSet.avgHR = currentSet.hrCount > 0 ? Math.round(currentSet.hrSum / currentSet.hrCount) : null;
     currentSet.totalDistance = currentSet.totalDistance.toFixed(2);
     currentSet.lapCount = lapCount;
     intervalSets.push(currentSet);
   }
-  
+
   // 인터벌 세트 기반 분석
   let intervalAnalysis = null;
   if (intervalSets.length > 0) {
     const totalDistance = intervalSets.reduce((sum, s) => sum + parseFloat(s.totalDistance), 0);
+    const totalEffectiveKm = intervalSets.reduce((sum, s) => sum + (s.totalEffectiveKm || parseFloat(s.totalDistance)), 0);
     const totalDurationSeconds = intervalSets.reduce((sum, s) => sum + s.totalDurationSeconds, 0);
-    const avgPaceSeconds = totalDurationSeconds / totalDistance;
+    const avgPaceSeconds = totalDurationSeconds / totalEffectiveKm;
     const validHRSets = intervalSets.filter(s => s.avgHR);
     const avgHR = validHRSets.length > 0
       ? Math.round(validHRSets.reduce((sum, s) => sum + s.avgHR, 0) / validHRSets.length)
@@ -1103,7 +1117,8 @@ function analyzeLaps(laps, activity, lapCorrections = {}, userMaxHR = 190) {
     };
   }
   
-  return { laps: finalLaps, intervalAnalysis, intervalSets };
+  const hasLapCorrections = finalLaps.some(l => l.userCorrected);
+  return { laps: finalLaps, intervalAnalysis, intervalSets, hasLapCorrections };
 }
 
 // 페이스 문자열을 초로 변환 (예: "4:30" → 270)
