@@ -361,13 +361,15 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     
     const analysis = analyzeLaps(laps, activity, lapCorrections, userMaxHR);
 
-    // 랩 수정이 있으면 전체 평균 페이스를 수정된 랩 페이스 기반으로 재계산
+    // 랩 수정이 있으면 수정된 랩들의 시간/유효거리로 평균 페이스 재계산
+    // (전체 랩 평균이 아닌 수정 구간만 사용 → rest 랩 GPS 오차 영향 배제)
     let avgPace = formatPace(activity.average_speed);
     if (analysis.hasLapCorrections && analysis.laps.length > 0) {
-      const totalDurSec = analysis.laps.reduce((sum, l) => sum + l.durationSeconds, 0);
-      const totalEffKm = analysis.laps.reduce((sum, l) => sum + (l.paceSeconds > 0 ? l.durationSeconds / l.paceSeconds : 0), 0);
-      if (totalEffKm > 0) {
-        avgPace = formatPaceFromSeconds(totalDurSec / totalEffKm);
+      const correctedLaps = analysis.laps.filter(l => l.userCorrected && l.paceSeconds > 0);
+      const totalCorrectedDur = correctedLaps.reduce((sum, l) => sum + l.durationSeconds, 0);
+      const totalCorrectedEffKm = correctedLaps.reduce((sum, l) => sum + l.durationSeconds / l.paceSeconds, 0);
+      if (totalCorrectedEffKm > 0 && totalCorrectedDur > 0) {
+        avgPace = formatPaceFromSeconds(totalCorrectedDur / totalCorrectedEffKm);
       }
     }
 
