@@ -354,6 +354,7 @@
         <button class="tab" data-tab="analysis" onclick="switchTab('analysis')">분석</button>
         <button class="tab" data-tab="calculator" onclick="switchTab('calculator')">계산기</button>
         <button class="tab" data-tab="progress" onclick="switchTab('progress')">추세</button>
+        <button class="tab" data-tab="weeklyreport" onclick="switchTab('weeklyreport')">주간 리포트</button>
         <button class="tab" data-tab="guide" onclick="switchTab('guide')">가이드</button>
       </div>
 
@@ -673,6 +674,19 @@
         <div id="progressEmpty" class="card" style="display:none; text-align:center; padding:40px; color:#64748b;">
           Sub-T 세션 또는 대회/TT 기록이 없으면 추세를 계산할 수 없습니다.<br>
           Sub-T 훈련을 기록하거나, 대회/TT 결과를 분류 변경하면 자동으로 추세가 표시됩니다.
+        </div>
+      </div>
+
+      <!-- Weekly Report Tab -->
+      <div id="weeklyreportTab" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+          <h2 style="font-size: 22px; font-weight: 600;">📋 주간 훈련 레포트</h2>
+        </div>
+        <div id="weeklyReportContent">
+          <div class="loading">
+            <div class="spinner"></div>
+            <p>데이터를 불러오는 중...</p>
+          </div>
         </div>
       </div>
 
@@ -1439,7 +1453,11 @@
           updatePredictedRaceTimes();
           updateTrainingRecommendations();
           updateTodayRecommendCard();
-          checkScheduleMismatch(); // 일정 불일치 체크 추가
+          checkScheduleMismatch();
+          // 주간 리포트 탭이 활성화되어 있으면 갱신
+          if (!document.getElementById('weeklyreportTab').classList.contains('hidden')) {
+            renderWeeklyReport();
+          }
         } else {
           workoutsList.innerHTML = `
             <div class="feedback-card feedback-danger">
@@ -2445,7 +2463,7 @@
         t.classList.toggle('active', t.dataset.tab === tab);
       });
       
-      ['dashboard', 'recommend', 'workouts', 'analysis', 'calculator', 'progress', 'guide'].forEach(t => {
+      ['dashboard', 'recommend', 'workouts', 'analysis', 'calculator', 'progress', 'weeklyreport', 'guide'].forEach(t => {
         document.getElementById(t + 'Tab').classList.toggle('hidden', t !== tab);
       });
 
@@ -2455,6 +2473,9 @@
       }
       if (tab === 'progress') {
         renderProgressPage();
+      }
+      if (tab === 'weeklyreport') {
+        renderWeeklyReport();
       }
     }
 
@@ -3738,8 +3759,477 @@
       }
     }
 
+    // ===== Weekly Report =====
+
+    let selectedReportWeekKey = null; // "YYYY-MM-DD" (월요일 기준)
+
+    function getWeekMonday(dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      const day = d.getDay();
+      const diff = (day === 0) ? -6 : 1 - day;
+      d.setDate(d.getDate() + diff);
+      return d;
+    }
+
+    function isoDate(d) {
+      return d.toISOString().split('T')[0];
+    }
+
+    function getAvailableReportWeeks() {
+      const weekMap = {};
+      workouts.forEach(w => {
+        const mon = getWeekMonday(w.date);
+        const key = isoDate(mon);
+        if (!weekMap[key]) weekMap[key] = { key, monday: mon };
+      });
+      return Object.values(weekMap).sort((a, b) => b.monday - a.monday);
+    }
+
+    function weekLabel(mondayDate) {
+      const sun = new Date(mondayDate);
+      sun.setDate(sun.getDate() + 6);
+      const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`;
+      return `${mondayDate.getFullYear()}년 ${mondayDate.getMonth() + 1}월 (${fmt(mondayDate)}~${fmt(sun)})`;
+    }
+
+    function getWorkoutsForWeek(weekKey) {
+      const mon = new Date(weekKey + 'T00:00:00');
+      const sun = new Date(mon);
+      sun.setDate(sun.getDate() + 6);
+      sun.setHours(23, 59, 59, 999);
+      return workouts.filter(w => {
+        const d = new Date(w.date + 'T00:00:00');
+        return d >= mon && d <= sun;
+      });
+    }
+
+    function renderWeeklyReport() {
+      const container = document.getElementById('weeklyReportContent');
+      if (!container) return;
+
+      const allWeeks = getAvailableReportWeeks();
+      if (allWeeks.length === 0) {
+        container.innerHTML = `
+          <div class="card" style="text-align:center; padding:60px; color:#64748b;">
+            훈련 기록이 없습니다. Strava와 연동 후 다시 시도해주세요.
+          </div>`;
+        return;
+      }
+
+      if (!selectedReportWeekKey || !allWeeks.find(w => w.key === selectedReportWeekKey)) {
+        selectedReportWeekKey = allWeeks[0].key;
+      }
+
+      const curIdx = allWeeks.findIndex(w => w.key === selectedReportWeekKey);
+      const prevWeek = curIdx < allWeeks.length - 1 ? allWeeks[curIdx + 1] : null;
+      const nextWeek = curIdx > 0 ? allWeeks[curIdx - 1] : null;
+      const curWeek = allWeeks[curIdx];
+
+      const weekWorkouts = getWorkoutsForWeek(selectedReportWeekKey);
+      const mainWorkouts = weekWorkouts.filter(w => w.type !== 'warmup-cooldown');
+      const _RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+
+      // ── 주간 통계 계산 ──
+      const subTSessions = mainWorkouts.filter(w => w.type === 'sub-t');
+      const easySessions = mainWorkouts.filter(w => w.type === 'easy');
+      const longSessions = mainWorkouts.filter(w => w.type === 'long');
+      const raceSessions = mainWorkouts.filter(w => _RACE_TYPES.includes(w.type));
+      const totalDist = mainWorkouts.reduce((s, w) => s + parseFloat(w.distance || 0), 0);
+      const totalTime = mainWorkouts.reduce((s, w) => s + (w.duration || 0), 0);
+      const qualityTime = subTSessions.reduce((s, w) => s + (w.duration || 0) * 0.6, 0);
+      const qualityPct = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+
+      // ── 준수 점수 계산 ──
+      const structureScore = Math.min(100,
+        (subTSessions.length >= 2 ? 40 : subTSessions.length * 20) +
+        (longSessions.length >= 1 ? 30 : 0) +
+        (easySessions.length >= 2 ? 30 : easySessions.length * 15)
+      );
+      const qvScore = qualityPct >= 18 && qualityPct <= 27 ? 90 :
+                      qualityPct > 0 ? 70 : 0;
+      const easyTooHard = easySessions.filter(w => w.avgHR && w.avgHR > userMaxHR * 0.70).length;
+      const easyScore = Math.max(0, 100 - easyTooHard * 25);
+      const overallScore = Math.round((structureScore + qvScore + easyScore) / 3);
+
+      // ── 훈련 효과 분석 ──
+      const subTLowHR = Math.round(userRestingHR + (userMaxHR - userRestingHR) * 0.82);
+      const subTHighHR = Math.round(userRestingHR + (userMaxHR - userRestingHR) * 0.88);
+      const easyMaxHR = Math.round(userMaxHR * 0.70);
+
+      // Sub-T 효과 평가
+      function evalSubT(w) {
+        const hr = w.intervalHR || w.avgHR;
+        if (!hr) return { badge: 'info', icon: '❓', text: 'HR 데이터 없음' };
+        if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', icon: '✅', text: `목표 HR 범위 (${hr}bpm)` };
+        if (hr < subTLowHR) return { badge: 'warning', icon: '⚠️', text: `HR 낮음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR})` };
+        return { badge: 'danger', icon: '🔴', text: `HR 높음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR})` };
+      }
+
+      // Easy 효과 평가
+      function evalEasy(w) {
+        if (!w.avgHR) return { badge: 'info', icon: '❓', text: 'HR 데이터 없음' };
+        if (w.avgHR <= easyMaxHR) return { badge: 'good', icon: '✅', text: `이지런 완벽 (${w.avgHR}bpm ≤ ${easyMaxHR})` };
+        const overBy = w.avgHR - easyMaxHR;
+        if (overBy <= 5) return { badge: 'warning', icon: '⚠️', text: `HR 약간 초과 – ${w.avgHR}bpm (+${overBy})` };
+        return { badge: 'danger', icon: '❌', text: `HR 초과 – ${w.avgHR}bpm (+${overBy})` };
+      }
+
+      // Long 효과 평가
+      function evalLong(w) {
+        if (w.duration >= 90) return { badge: 'good', icon: '✅', text: `${w.duration}분 – 충분한 롱런` };
+        if (w.duration >= 70) return { badge: 'warning', icon: '⚠️', text: `${w.duration}분 – 85분 이상 권장` };
+        return { badge: 'danger', icon: '❌', text: `${w.duration}분 – 롱런으로 보기 짧음` };
+      }
+
+      // ── 요일별 운동 맵핑 ──
+      const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+      const DAY_COLORS = {
+        'sub-t': 'rgba(245,158,11,0.25)',
+        'easy': 'rgba(34,197,94,0.2)',
+        'long': 'rgba(139,92,246,0.2)',
+        'warmup-cooldown': 'rgba(100,116,139,0.15)',
+      };
+      const dayMap = {};
+      weekWorkouts.forEach(w => {
+        const d = new Date(w.date + 'T00:00:00').getDay();
+        if (!dayMap[d]) dayMap[d] = [];
+        dayMap[d].push(w);
+      });
+
+      // 월(1)~일(0) 순 → 월~일 7칸
+      const weekDays = [1, 2, 3, 4, 5, 6, 0];
+
+      // ── 주간 피드백 생성 ──
+      const feedbacks = [];
+
+      if (subTSessions.length === 0) {
+        feedbacks.push({ type: 'danger', icon: '❌', title: 'Sub-T 세션 없음', text: '이번 주 Norwegian Singles 핵심인 Sub-T 훈련이 없었습니다. 2-3회 Sub-T 세션을 포함해보세요.' });
+      } else if (subTSessions.length >= 2) {
+        feedbacks.push({ type: 'good', icon: '✅', title: `Sub-T ${subTSessions.length}회 완료`, text: 'Norwegian Singles 권장 횟수(2-3회)를 충족했습니다.' });
+      } else {
+        feedbacks.push({ type: 'warning', icon: '⚠️', title: `Sub-T ${subTSessions.length}회`, text: 'Sub-T 세션이 1회입니다. 2-3회를 목표로 해보세요.' });
+      }
+
+      if (easyTooHard > 0) {
+        feedbacks.push({ type: 'danger', icon: '❌', title: `이지런 HR 초과 ${easyTooHard}회`, text: `${easyTooHard}개 이지런에서 HR ${easyMaxHR}bpm을 초과했습니다. Easy를 더 쉽게 뛰면 Sub-T 품질이 향상됩니다.` });
+      } else if (easySessions.length > 0) {
+        feedbacks.push({ type: 'good', icon: '✅', title: '이지런 HR 준수', text: '모든 이지런에서 HR을 제대로 유지했습니다.' });
+      }
+
+      if (longSessions.length === 0 && mainWorkouts.length >= 3) {
+        feedbacks.push({ type: 'warning', icon: '⚠️', title: '롱런 없음', text: '이번 주 롱런이 없었습니다. 주 1회 85분 이상 롱런을 권장합니다.' });
+      } else if (longSessions.length > 0) {
+        feedbacks.push({ type: 'good', icon: '✅', title: '롱런 완료', text: `${longSessions.length}회 롱런을 포함했습니다.` });
+      }
+
+      if (qualityPct > 30) {
+        feedbacks.push({ type: 'danger', icon: '🔴', title: `퀄리티 볼륨 과다 (${qualityPct}%)`, text: '주간 총 시간의 30%를 초과했습니다. 과부하 위험이 있으므로 Easy 비중을 늘려주세요.' });
+      } else if (qualityPct >= 18 && qualityPct <= 27) {
+        feedbacks.push({ type: 'good', icon: '✅', title: `퀄리티 볼륨 적정 (${qualityPct}%)`, text: '20-25% 목표 범위에 잘 맞습니다.' });
+      } else if (qualityPct > 0) {
+        feedbacks.push({ type: 'warning', icon: '⚠️', title: `퀄리티 볼륨 낮음 (${qualityPct}%)`, text: '20-25%를 목표로 Sub-T 볼륨을 조정해보세요.' });
+      }
+
+      // ── Sub-T 인터벌 상세 분석 ──
+      const subTWithGoodHR = subTSessions.filter(w => {
+        const hr = w.intervalHR || w.avgHR;
+        return hr && hr >= subTLowHR && hr <= subTHighHR;
+      });
+      const subTHRCompliance = subTSessions.length > 0
+        ? Math.round((subTWithGoodHR.length / subTSessions.length) * 100)
+        : null;
+
+      // ── HTML 렌더링 ──
+      const scoreColor = s => s >= 80 ? '#22c55e' : s >= 60 ? '#f59e0b' : '#ef4444';
+      const fmtDist = d => parseFloat(d).toFixed(1);
+      const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+
+      const typeIcon = t => t === 'sub-t' ? '🔥' : t === 'long' ? '🏃' : t === 'easy' ? '🚶' : _RACE_TYPES.includes(t) ? '🏅' : '🔄';
+      const typeName = t => t === 'sub-t' ? 'Sub-T' : t === 'long' ? '롱런' : t === 'easy' ? '이지런' : t === 'warmup-cooldown' ? '워밍업' : _RACE_TYPES.includes(t) ? '대회/TT' : t;
+
+      container.innerHTML = `
+        <!-- 주차 네비게이션 -->
+        <div class="card" style="padding: 16px 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <button onclick="navigateReportWeek('prev')" ${!prevWeek ? 'disabled' : ''} class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px; ${!prevWeek ? 'opacity:0.3;' : ''}">
+              ← 이전 주
+            </button>
+            <div style="text-align: center; flex: 1;">
+              <div style="font-size: 16px; font-weight: 700; color: #fbbf24;">${weekLabel(curWeek.monday)}</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 4px;">${mainWorkouts.length}회 훈련 · ${fmtDist(totalDist)}km · ${fmtMin(totalTime)}</div>
+              <select onchange="selectedReportWeekKey=this.value; renderWeeklyReport();"
+                style="margin-top: 8px; padding: 4px 8px; border-radius: 6px; background: rgba(30,41,59,0.8); border: 1px solid rgba(71,85,105,0.5); color: #94a3b8; font-size: 12px; cursor: pointer;">
+                ${allWeeks.map(w => `<option value="${w.key}" ${w.key === selectedReportWeekKey ? 'selected' : ''}>${weekLabel(w.monday)}</option>`).join('')}
+              </select>
+            </div>
+            <button onclick="navigateReportWeek('next')" ${!nextWeek ? 'disabled' : ''} class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px; ${!nextWeek ? 'opacity:0.3;' : ''}">
+              다음 주 →
+            </button>
+          </div>
+        </div>
+
+        <!-- 주간 요약 통계 -->
+        <div class="stats-grid" style="margin-bottom: 20px;">
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(59,130,246,0.2);">📏</div>
+            <div class="stat-value" style="color: #60a5fa;">${fmtDist(totalDist)}<span style="font-size:16px;">km</span></div>
+            <div class="stat-label">총 거리</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(100,116,139,0.2);">⏱️</div>
+            <div class="stat-value" style="color: #94a3b8; font-size: 22px;">${fmtMin(totalTime)}</div>
+            <div class="stat-label">총 훈련 시간</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(245,158,11,0.2);">🔥</div>
+            <div class="stat-value" style="color: #fbbf24;">${subTSessions.length}</div>
+            <div class="stat-label">Sub-T 세션</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(34,197,94,0.2);">📊</div>
+            <div class="stat-value" style="color: ${qualityPct >= 18 && qualityPct <= 27 ? '#22c55e' : '#f59e0b'};">${qualityPct}%</div>
+            <div class="stat-label">퀄리티 볼륨</div>
+          </div>
+        </div>
+
+        <!-- 요일별 훈련 구조 -->
+        <div class="card">
+          <div class="card-title">📅 이번 주 훈련 구조</div>
+          <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;">
+            ${weekDays.map(dayNum => {
+              const dayWorkouts = dayMap[dayNum] || [];
+              const mainW = dayWorkouts.find(w => w.type === 'sub-t') ||
+                            dayWorkouts.find(w => _RACE_TYPES.includes(w.type)) ||
+                            dayWorkouts.find(w => w.type === 'long') ||
+                            dayWorkouts.find(w => w.type === 'easy') ||
+                            dayWorkouts[0];
+              const bgColor = mainW ? (DAY_COLORS[mainW.type] || 'rgba(59,130,246,0.2)') : 'rgba(30,41,59,0.3)';
+              return `
+                <div style="text-align:center; padding: 10px 4px; background: ${bgColor}; border-radius: 10px; border: 1px solid rgba(71,85,105,0.2);">
+                  <div style="font-size:11px; color:#64748b; margin-bottom:4px;">${DAY_NAMES[dayNum]}</div>
+                  <div style="font-size:20px;">${mainW ? typeIcon(mainW.type) : '–'}</div>
+                  <div style="font-size:10px; color:${mainW ? '#94a3b8' : '#374151'}; margin-top:4px;">${mainW ? typeName(mainW.type) : '휴식'}</div>
+                  ${mainW ? `<div style="font-size:10px; color:#64748b;">${parseFloat(mainW.distance).toFixed(1)}km</div>` : ''}
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- 준수 점수 -->
+        <div class="card">
+          <div class="card-title">🎯 Norwegian Singles 준수 점수</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; text-align: center;">
+            ${[
+              { label: '종합', score: overallScore, color: scoreColor(overallScore) },
+              { label: '주간 구조', score: structureScore, color: scoreColor(structureScore) },
+              { label: '퀄리티 볼륨', score: qvScore, color: scoreColor(qvScore) },
+              { label: '이지런 HR', score: easyScore, color: scoreColor(easyScore) },
+            ].map(({ label, score, color }) => `
+              <div style="padding: 16px; background: rgba(30,41,59,0.5); border-radius: 12px;">
+                <div class="score-ring">
+                  <svg width="100" height="100" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(71,85,105,0.3)" stroke-width="8"/>
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="${color}" stroke-width="8" stroke-dasharray="${score * 2.64} 264" stroke-linecap="round"/>
+                  </svg>
+                  <div class="score-value" style="color:${color};">${score}</div>
+                </div>
+                <div style="font-size:13px; font-weight:600; margin-top:4px;">${label}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 개별 훈련 목록 -->
+        <div class="card">
+          <div class="card-title">🏃 훈련 목록</div>
+          ${weekWorkouts.length === 0 ? `<div style="text-align:center; padding:40px; color:#64748b;">이번 주 훈련 기록이 없습니다.</div>` : ''}
+          ${weekWorkouts.sort((a, b) => new Date(a.date) - new Date(b.date)).map(w => {
+            let eval_ = null;
+            if (w.type === 'sub-t') eval_ = evalSubT(w);
+            else if (w.type === 'easy') eval_ = evalEasy(w);
+            else if (w.type === 'long') eval_ = evalLong(w);
+            else if (_RACE_TYPES.includes(w.type)) eval_ = { badge: 'info', icon: '🏅', text: '대회 / TT 기록' };
+            else if (w.type === 'warmup-cooldown') eval_ = { badge: 'info', icon: '🔄', text: '워밍업 / 쿨다운' };
+
+            const badgeColors = {
+              good: 'rgba(34,197,94,0.15)',
+              warning: 'rgba(245,158,11,0.15)',
+              danger: 'rgba(239,68,68,0.15)',
+              info: 'rgba(100,116,139,0.15)',
+            };
+            const badgeBorder = {
+              good: 'rgba(34,197,94,0.3)',
+              warning: 'rgba(245,158,11,0.3)',
+              danger: 'rgba(239,68,68,0.3)',
+              info: 'rgba(100,116,139,0.3)',
+            };
+            const badgeTextColor = {
+              good: '#22c55e',
+              warning: '#fbbf24',
+              danger: '#f87171',
+              info: '#94a3b8',
+            };
+            const b = eval_ ? eval_.badge : 'info';
+
+            const dateObj = new Date(w.date + 'T00:00:00');
+            const dateStr = `${dateObj.getMonth()+1}/${dateObj.getDate()}(${DAY_NAMES[dateObj.getDay()]})`;
+
+            return `
+              <div style="padding: 14px 16px; border-radius: 12px; background: rgba(30,41,59,0.5); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 200px;">
+                  <div style="font-size: 24px;">${typeIcon(w.type)}</div>
+                  <div>
+                    <div style="font-weight: 600; font-size: 14px;">${dateStr} · ${typeName(w.type)}</div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 2px;">${w.name || ''}</div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                  <div style="text-align:center;">
+                    <div style="font-size:11px; color:#64748b;">거리</div>
+                    <div style="font-size:14px; font-weight:600;">${parseFloat(w.distance).toFixed(1)}km</div>
+                  </div>
+                  <div style="text-align:center;">
+                    <div style="font-size:11px; color:#64748b;">시간</div>
+                    <div style="font-size:14px; font-weight:600;">${fmtMin(w.duration)}</div>
+                  </div>
+                  <div style="text-align:center;">
+                    <div style="font-size:11px; color:#64748b;">페이스</div>
+                    <div style="font-size:14px; font-weight:600;">${w.correctedPace || w.avgPace || '--'}</div>
+                  </div>
+                  ${w.avgHR ? `<div style="text-align:center;">
+                    <div style="font-size:11px; color:#64748b;">평균HR</div>
+                    <div style="font-size:14px; font-weight:600;">${w.avgHR}</div>
+                  </div>` : ''}
+                  ${eval_ ? `<div style="padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap;
+                    background: ${badgeColors[b]}; border: 1px solid ${badgeBorder[b]}; color: ${badgeTextColor[b]};">
+                    ${eval_.icon} ${eval_.text}
+                  </div>` : ''}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+
+        <!-- 훈련 효과 분석 -->
+        <div class="card">
+          <div class="card-title">📊 훈련 효과 분석</div>
+
+          ${subTSessions.length > 0 ? `
+          <div style="margin-bottom: 20px;">
+            <div style="font-weight: 600; margin-bottom: 12px; color: #fbbf24;">🔥 Sub-T 세션 분석</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <div style="padding: 14px; background: rgba(245,158,11,0.1); border-radius: 10px; border: 1px solid rgba(245,158,11,0.2);">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">목표 HR 범위</div>
+                <div style="font-size:16px; font-weight:700; color:#fbbf24;">${subTLowHR}~${subTHighHR}bpm</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">Karvonen 82-88%</div>
+              </div>
+              <div style="padding: 14px; background: rgba(245,158,11,0.1); border-radius: 10px; border: 1px solid rgba(245,158,11,0.2);">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">HR 범위 내 세션</div>
+                <div style="font-size:16px; font-weight:700; color:${subTHRCompliance >= 70 ? '#22c55e' : '#f59e0b'};">${subTWithGoodHR.length}/${subTSessions.length}회</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">${subTHRCompliance !== null ? subTHRCompliance + '%' : '--'} 준수율</div>
+              </div>
+              ${subTSessions.some(w => w.intervalPace) ? `
+              <div style="padding: 14px; background: rgba(245,158,11,0.1); border-radius: 10px; border: 1px solid rgba(245,158,11,0.2);">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">기록된 인터벌 페이스</div>
+                <div style="font-size:16px; font-weight:700; color:#fbbf24;">${subTSessions.find(w => w.intervalPace)?.intervalPace || '--'}/km</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">최근 Sub-T 기준</div>
+              </div>` : ''}
+            </div>
+            ${subTSessions.map(w => {
+              const ev = evalSubT(w);
+              const dateObj = new Date(w.date + 'T00:00:00');
+              const ds = `${dateObj.getMonth()+1}/${dateObj.getDate()}`;
+              return `<div class="feedback-card feedback-${ev.badge === 'good' ? 'good' : ev.badge === 'warning' ? 'warning' : ev.badge === 'danger' ? 'danger' : 'info'}" style="margin-bottom:8px;">
+                <span class="feedback-icon">${ev.icon}</span>
+                <div>
+                  <div class="feedback-title">${ds} Sub-T 세션 (${parseFloat(w.distance).toFixed(1)}km, ${fmtMin(w.duration)})</div>
+                  <div class="feedback-text">${ev.text}${w.intervalPace ? ` · 인터벌 페이스: ${w.intervalPace}/km` : ''}${w.subType ? ` · ${w.subType === 'short' ? '짧은' : w.subType === 'medium' ? '중간' : '긴'} 인터벌` : ''}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+
+          ${easySessions.length > 0 ? `
+          <div style="margin-bottom: 20px;">
+            <div style="font-weight: 600; margin-bottom: 12px; color: #22c55e;">🚶 이지런 분석</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <div style="padding: 14px; background: rgba(34,197,94,0.1); border-radius: 10px; border: 1px solid rgba(34,197,94,0.2);">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">이지런 상한 HR</div>
+                <div style="font-size:16px; font-weight:700; color:#22c55e;">${easyMaxHR}bpm</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">MaxHR 70%</div>
+              </div>
+              <div style="padding: 14px; background: rgba(34,197,94,0.1); border-radius: 10px; border: 1px solid rgba(34,197,94,0.2);">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">HR 준수 세션</div>
+                <div style="font-size:16px; font-weight:700; color:${easyScore >= 75 ? '#22c55e' : '#f59e0b'};">${easySessions.length - easyTooHard}/${easySessions.length}회</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">${easySessions.length > 0 ? Math.round(((easySessions.length - easyTooHard) / easySessions.length) * 100) : 0}% 준수율</div>
+              </div>
+            </div>
+            ${easySessions.map(w => {
+              const ev = evalEasy(w);
+              const dateObj = new Date(w.date + 'T00:00:00');
+              const ds = `${dateObj.getMonth()+1}/${dateObj.getDate()}`;
+              return `<div class="feedback-card feedback-${ev.badge === 'good' ? 'good' : ev.badge === 'warning' ? 'warning' : ev.badge === 'danger' ? 'danger' : 'info'}" style="margin-bottom:8px;">
+                <span class="feedback-icon">${ev.icon}</span>
+                <div>
+                  <div class="feedback-title">${ds} 이지런 (${parseFloat(w.distance).toFixed(1)}km, ${fmtMin(w.duration)})</div>
+                  <div class="feedback-text">${ev.text}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+
+          ${longSessions.length > 0 ? `
+          <div>
+            <div style="font-weight: 600; margin-bottom: 12px; color: #a78bfa;">🏃 롱런 분석</div>
+            ${longSessions.map(w => {
+              const ev = evalLong(w);
+              const dateObj = new Date(w.date + 'T00:00:00');
+              const ds = `${dateObj.getMonth()+1}/${dateObj.getDate()}`;
+              return `<div class="feedback-card feedback-${ev.badge === 'good' ? 'good' : ev.badge === 'warning' ? 'warning' : 'danger'}" style="margin-bottom:8px;">
+                <span class="feedback-icon">${ev.icon}</span>
+                <div>
+                  <div class="feedback-title">${ds} 롱런 (${parseFloat(w.distance).toFixed(1)}km)</div>
+                  <div class="feedback-text">${ev.text}${w.avgHR ? ` · 평균 HR: ${w.avgHR}bpm` : ''}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+
+          ${subTSessions.length === 0 && easySessions.length === 0 && longSessions.length === 0 ? `
+          <div style="text-align:center; padding:40px; color:#64748b;">
+            이번 주 분석할 훈련이 없습니다.
+          </div>` : ''}
+        </div>
+
+        <!-- 주간 총평 -->
+        <div class="card">
+          <div class="card-title">💬 주간 총평</div>
+          ${feedbacks.map(f => `
+            <div class="feedback-card feedback-${f.type === 'good' ? 'good' : f.type === 'warning' ? 'warning' : f.type === 'danger' ? 'danger' : 'info'}">
+              <span class="feedback-icon">${f.icon}</span>
+              <div>
+                <div class="feedback-title">${f.title}</div>
+                <div class="feedback-text">${f.text}</div>
+              </div>
+            </div>
+          `).join('')}
+          ${feedbacks.length === 0 ? `<div style="text-align:center; padding:30px; color:#64748b;">이번 주 훈련 기록이 없습니다.</div>` : ''}
+        </div>
+      `;
+    }
+
+    function navigateReportWeek(direction) {
+      const weeks = getAvailableReportWeeks();
+      const curIdx = weeks.findIndex(w => w.key === selectedReportWeekKey);
+      if (direction === 'prev' && curIdx < weeks.length - 1) {
+        selectedReportWeekKey = weeks[curIdx + 1].key;
+      } else if (direction === 'next' && curIdx > 0) {
+        selectedReportWeekKey = weeks[curIdx - 1].key;
+      }
+      renderWeeklyReport();
+    }
+
     // ===== Initialize =====
-    
+
     document.addEventListener('DOMContentLoaded', function() {
       checkLoginStatus();
       calculatePaces();

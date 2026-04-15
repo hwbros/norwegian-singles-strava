@@ -8,7 +8,15 @@
       "Bash(git -C \"c:/work/norwegian-singles-strava\" diff HEAD -- server.js)",
       "Bash(git -C \"c:/work/norwegian-singles-strava\" diff HEAD -- public/index.html)",
       "Bash(git -C \"c:/work/norwegian-singles-strava\" log --oneline -3)",
-      "Bash(git -C \"c:/work/norwegian-singles-strava\" show HEAD:server.js)"
+      "Bash(git -C \"c:/work/norwegian-singles-strava\" show HEAD:server.js)",
+      "Bash(node -e ' *)",
+      "Bash(node.exe -e ' *)",
+      "Bash(where node *)",
+      "Read(//usr/local/bin/**)",
+      "Read(//c/Users/Taehong/.nvm/versions/**)",
+      "Bash(/c/work/norwegian-singles-strava/node_modules/.bin/node --version)",
+      "Bash(npx --version)",
+      "Read(//mingw64/bin/**)"
     ]
   }
 }
