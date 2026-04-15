@@ -145,6 +145,10 @@
     .badge-treadmill { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
     .badge-warning { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
     .badge-success { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .badge-race-hm { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4); }
+    .badge-race-fm { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4); }
+    .badge-race-5k { background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+    .badge-race-10k { background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
     
     /* 워밍업/쿨다운 활동 카드 스타일 */
     .workout-card.warmup-cooldown { opacity: 0.6; }
@@ -653,7 +657,7 @@
             <div id="progressChart"></div>
           </div>
           <div style="font-size:11px; color:#64748b; margin-top:8px;">
-            ● 점: Sub-T 세션 있는 주차 &nbsp;○ 점: 세션 없어 이전 주 예측값 유지
+            ◆ 금색 다이아몬드: 대회/TT 기록 (실측값, 높은 가중치) &nbsp;● 원: Sub-T 세션 주차 &nbsp;○ 빈 원: 세션 없어 이전값 유지
           </div>
         </div>
 
@@ -667,8 +671,8 @@
 
         <!-- 데이터 없음 -->
         <div id="progressEmpty" class="card" style="display:none; text-align:center; padding:40px; color:#64748b;">
-          Sub-T 세션이 없으면 추세를 계산할 수 없습니다.<br>
-          Sub-T 훈련을 기록하면 자동으로 추세가 표시됩니다.
+          Sub-T 세션 또는 대회/TT 기록이 없으면 추세를 계산할 수 없습니다.<br>
+          Sub-T 훈련을 기록하거나, 대회/TT 결과를 분류 변경하면 자동으로 추세가 표시됩니다.
         </div>
       </div>
 
@@ -1490,11 +1494,27 @@
         const typeWasChanged = w.autoType && w.type !== w.autoType;
         
         // 아이콘 결정
-        const typeIcon = w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : isWarmupCooldown ? '🔄' : '🚶';
-        
+        const RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+        const isRaceType = RACE_TYPES.includes(w.type);
+        const typeIcon = w.type === 'sub-t' ? '🔥' : w.type === 'long' ? '🏃' : isWarmupCooldown ? '🔄' : isRaceType ? '🏅' : '🚶';
+
         // 배지 클래스와 텍스트
-        const badgeClass = w.type === 'sub-t' ? 'badge-sub-t' : w.type === 'long' ? 'badge-long' : isWarmupCooldown ? 'badge-warmup' : 'badge-easy';
-        const badgeText = w.type === 'sub-t' ? 'Sub-T' : w.type === 'long' ? 'Long Run' : isWarmupCooldown ? '워밍업/쿨다운' : 'Easy';
+        const badgeClass = w.type === 'sub-t' ? 'badge-sub-t'
+          : w.type === 'long' ? 'badge-long'
+          : isWarmupCooldown ? 'badge-warmup'
+          : w.type === 'race-hm' ? 'badge-race-hm'
+          : w.type === 'race-fm' ? 'badge-race-fm'
+          : w.type === 'race-5k' ? 'badge-race-5k'
+          : w.type === 'race-10k' ? 'badge-race-10k'
+          : 'badge-easy';
+        const badgeText = w.type === 'sub-t' ? 'Sub-T'
+          : w.type === 'long' ? 'Long Run'
+          : isWarmupCooldown ? '워밍업/쿨다운'
+          : w.type === 'race-hm' ? '🏅 하프대회'
+          : w.type === 'race-fm' ? '🏅 풀코스대회'
+          : w.type === 'race-5k' ? '🎯 5K TT'
+          : w.type === 'race-10k' ? '🎯 10K TT'
+          : 'Easy';
         
         html += `
           <div class="workout-card ${isExpanded ? 'expanded' : ''} ${isWarmupCooldown ? 'warmup-cooldown' : ''}">
@@ -1516,9 +1536,9 @@
                 </div>
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                ${w.type === 'sub-t' ? `
+                ${(w.type === 'sub-t' || isRaceType) ? `
                   <button class="btn btn-secondary" style="padding: 8px 12px; font-size: 13px;" onclick="toggleActivityDetail(${w.id})">
-                    ${isLoading ? '⏳' : isExpanded ? '▲ 접기' : '▼ 인터벌 분석'}
+                    ${isLoading ? '⏳' : isExpanded ? '▲ 접기' : isRaceType ? '▼ 랩 분석' : '▼ 인터벌 분석'}
                   </button>
                 ` : ''}
                 ${w.isTreadmill ? `
@@ -1893,7 +1913,11 @@
         { value: 'sub-t', label: '🔥 Sub-T (인터벌)', desc: 'Sub-threshold 인터벌 훈련' },
         { value: 'easy', label: '🚶 Easy Run', desc: '편안한 회복 달리기' },
         { value: 'long', label: '🏃 Long Run', desc: '장거리 지구력 훈련' },
-        { value: 'warmup-cooldown', label: '🔄 워밍업/쿨다운', desc: '분석에서 제외됨' }
+        { value: 'warmup-cooldown', label: '🔄 워밍업/쿨다운', desc: '분석에서 제외됨' },
+        { value: 'race-hm', label: '🏅 하프마라톤 대회', desc: '21.1km 대회 기록 - 추세에 반영' },
+        { value: 'race-fm', label: '🏅 풀코스 대회', desc: '42.2km 대회 기록 - 추세에 반영' },
+        { value: 'race-5k', label: '🎯 5K TT', desc: '5km 타임트라이얼 - 추세에 반영' },
+        { value: 'race-10k', label: '🎯 10K TT', desc: '10km 타임트라이얼 - 추세에 반영' }
       ];
       
       const subTypes = [
@@ -2191,19 +2215,20 @@
     function updateDashboard() {
       // 워밍업/쿨다운 제외한 활동만 필터링
       const mainWorkouts = workouts.filter(w => w.type !== 'warmup-cooldown');
-      
+
       // Count workout types
       const subTCount = mainWorkouts.filter(w => w.type === 'sub-t').length;
       const easyCount = mainWorkouts.filter(w => w.type === 'easy').length;
       const longCount = mainWorkouts.filter(w => w.type === 'long').length;
+      const raceCount = mainWorkouts.filter(w => RACE_TYPES.includes(w.type)).length;
       const warmupCount = workouts.filter(w => w.type === 'warmup-cooldown').length;
-      
+
       // Calculate quality volume (워밍업/쿨다운 제외)
       const totalTime = mainWorkouts.reduce((sum, w) => sum + w.duration, 0);
       const qualityTime = mainWorkouts.filter(w => w.type === 'sub-t')
         .reduce((sum, w) => sum + (w.duration * 0.6), 0);
       const qualityPercent = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
-      
+
       // Update stats grid
       document.getElementById('statsGrid').innerHTML = `
         <div class="stat-card">
@@ -2226,6 +2251,13 @@
           <div class="stat-value" style="color: #60a5fa;">${qualityPercent}%</div>
           <div class="stat-label">퀄리티 비율</div>
         </div>
+        ${raceCount > 0 ? `
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(239,68,68,0.2);">🏅</div>
+            <div class="stat-value" style="color: #f87171;">${raceCount}</div>
+            <div class="stat-label">대회/TT</div>
+          </div>
+        ` : ''}
         ${warmupCount > 0 ? `
           <div class="stat-card" style="opacity: 0.6;">
             <div class="stat-icon" style="background: rgba(100,116,139,0.2);">🔄</div>
@@ -2761,9 +2793,38 @@
     let lastWeeklyData = [];
 
     // Sub-T 세션 목록 + 기준 날짜로 가중 HM 페이스 계산 (updatePredictedRaceTimes와 동일 로직)
+    const RACE_DIST_MAP = { 'race-hm': 21.0975, 'race-fm': 42.195, 'race-5k': 5, 'race-10k': 10 };
+
     function calcWeightedHMPace(sessions, asOfDate) {
       const results = [];
       sessions.forEach(w => {
+        // 최신성 가중치 (공통)
+        const daysSince = (asOfDate - new Date(w.date)) / 86400000;
+        if (daysSince < 0) return; // 미래 세션 제외
+        const recencyWeight = Math.exp(-daysSince / 28);
+
+        // ── Race/TT 타입: 실제 레이스 기록 → Riegel 환산 ──
+        if (RACE_TYPES.includes(w.type)) {
+          const paceStr = w.correctedPace || w.avgPace;
+          const parts = (paceStr || '').split(':');
+          if (parts.length !== 2) return;
+          const racePaceSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          if (!racePaceSec || racePaceSec <= 0 || racePaceSec >= 900) return;
+
+          const raceDist = RACE_DIST_MAP[w.type] || parseFloat(w.distance);
+          if (!raceDist) return;
+
+          // 실제 레이스 타임 → Riegel 공식으로 HM 환산
+          const raceTimeSec = racePaceSec * raceDist;
+          const hmTimeSec = convertRaceTime(raceTimeSec, raceDist, 21.0975);
+          const hmEquivPace = hmTimeSec / 21.0975;
+
+          // 레이스는 최고 정확도 데이터 → 높은 가중치
+          results.push({ hmEquivPace, weight: recencyWeight * 2.5, isRace: true });
+          return;
+        }
+
+        // ── Sub-T 세션 기존 로직 ──
         const paceStr = w.intervalPace || w.correctedPace || w.avgPace;
         const parts = (paceStr || '').split(':');
         if (parts.length !== 2) return;
@@ -2781,11 +2842,6 @@
           const hrFactor = Math.max(0.95, Math.min(1.05, 1 + deviation * 0.4));
           hmEquivPace *= hrFactor;
         }
-
-        // 최신성 가중치 (asOfDate 기준)
-        const daysSince = (asOfDate - new Date(w.date)) / 86400000;
-        if (daysSince < 0) return; // 미래 세션 제외
-        const recencyWeight = Math.exp(-daysSince / 28);
 
         // 인터벌 볼륨 가중치
         const setDurationMin = { short: 5, medium: 10, long: 12 }[w.subType] || 8;
@@ -2808,11 +2864,15 @@
 
     // 주차별 예측 데이터 생성
     function buildWeeklyPredictions() {
-      const subTWorkouts = workouts.filter(w => w.type === 'sub-t' && w.avgPace && w.avgPace !== 'N/A');
-      if (subTWorkouts.length === 0) return [];
+      // Sub-T + 모든 Race/TT 세션 포함
+      const qualitySessions = workouts.filter(w =>
+        (w.type === 'sub-t' || RACE_TYPES.includes(w.type)) &&
+        w.avgPace && w.avgPace !== 'N/A'
+      );
+      if (qualitySessions.length === 0) return [];
 
-      // 첫 Sub-T 세션이 있는 주의 월요일부터 이번 주까지
-      const allDates = subTWorkouts.map(w => new Date(w.date));
+      // 첫 세션이 있는 주의 월요일부터 이번 주까지
+      const allDates = qualitySessions.map(w => new Date(w.date));
       const minDate  = new Date(Math.min(...allDates));
       const today    = new Date();
 
@@ -2832,13 +2892,15 @@
 
         const effectiveEnd = weekEnd > today ? today : weekEnd;
 
-        // 이 주까지의 모든 Sub-T 세션
-        const sessionsUpTo = subTWorkouts.filter(w => new Date(w.date) <= effectiveEnd);
-        // 이 주에 새로 있는 Sub-T 세션
-        const thisWeekSessions = subTWorkouts.filter(w => {
+        // 이 주까지의 모든 세션
+        const sessionsUpTo = qualitySessions.filter(w => new Date(w.date) <= effectiveEnd);
+        // 이 주에 새로 있는 세션
+        const thisWeekSessions = qualitySessions.filter(w => {
           const d = new Date(w.date);
           return d >= weekStart && d <= effectiveEnd;
         });
+        // 이 주의 레이스 여부
+        const thisWeekRaces = thisWeekSessions.filter(w => RACE_TYPES.includes(w.type));
 
         if (sessionsUpTo.length > 0) {
           const hmPace = calcWeightedHMPace(sessionsUpTo, effectiveEnd);
@@ -2855,6 +2917,8 @@
               hasSession: thisWeekSessions.length > 0,
               sessionCount: thisWeekSessions.length,
               totalSessions: sessionsUpTo.length,
+              hasRace: thisWeekRaces.length > 0,
+              raceTypes: thisWeekRaces.map(w => w.type),
             });
           }
         }
@@ -2930,9 +2994,15 @@
         const x = xPos(i), y = yPos(getVal(d));
         const isFirst = i === 0, isLast = i === data.length - 1;
 
-        // 포인트 (세션 있으면 채움, 없으면 빈 원)
+        // 포인트 (레이스=다이아몬드, 세션있음=채움 원, 세션없음=빈 원)
         if (d.hasSession) {
-          svg += `<circle cx="${x}" cy="${y}" r="5" fill="${improved ? '#22c55e' : '#fbbf24'}" stroke="#1e293b" stroke-width="1.5"/>`;
+          if (d.hasRace) {
+            // 레이스 주차: 금색 다이아몬드
+            const s = 6;
+            svg += `<polygon points="${x},${y - s} ${x + s},${y} ${x},${y + s} ${x - s},${y}" fill="#fbbf24" stroke="#1e293b" stroke-width="1.5"/>`;
+          } else {
+            svg += `<circle cx="${x}" cy="${y}" r="5" fill="${improved ? '#22c55e' : '#fbbf24'}" stroke="#1e293b" stroke-width="1.5"/>`;
+          }
         } else {
           svg += `<circle cx="${x}" cy="${y}" r="4" fill="#1e293b" stroke="${improved ? '#22c55e' : '#f59e0b'}" stroke-width="1.5" stroke-dasharray="2,2"/>`;
         }
@@ -2947,7 +3017,8 @@
         if (isFirst || isLast || d.hasSession) {
           svg += `<text x="${x}" y="${H - padB + 14}" text-anchor="middle" font-size="10" fill="#64748b">${d.weekLabel}</text>`;
           if (d.hasSession) {
-            svg += `<text x="${x}" y="${H - padB + 24}" text-anchor="middle" font-size="9" fill="#fbbf24">(${d.sessionCount}세션)</text>`;
+            const sessionLabel = d.hasRace ? `🏅 대회` : `${d.sessionCount}세션`;
+            svg += `<text x="${x}" y="${H - padB + 24}" text-anchor="middle" font-size="9" fill="${d.hasRace ? '#f87171' : '#fbbf24'}">(${sessionLabel})</text>`;
           }
         }
       });
@@ -3001,7 +3072,11 @@
             ${d.weekLabel}${isLatest ? ' <span style="font-size:10px; color:#fbbf24;">(최근)</span>' : ''}
           </td>
           <td style="padding:8px 6px; text-align:center; font-size:12px;">
-            ${d.hasSession ? `<span style="color:#fbbf24;">${d.sessionCount}회</span>` : '<span style="color:#475569;">-</span>'}
+            ${d.hasSession
+              ? d.hasRace
+                ? `<span style="color:#f87171;">🏅 대회</span>`
+                : `<span style="color:#fbbf24;">${d.sessionCount}회</span>`
+              : '<span style="color:#475569;">-</span>'}
           </td>
           <td style="padding:8px 6px; text-align:center; font-weight:600;">${formatTime(d.fiveKSec)}</td>
           <td style="padding:8px 6px; text-align:center; font-weight:600;">${formatTime(d.tenKSec)}</td>
@@ -3093,11 +3168,18 @@
       'sub-t-short': { name: '짧은 Sub-T', desc: '6×1000m (60초 휴식)', icon: '🔥', color: '#fbbf24' },
       'sub-t-medium': { name: '중간 Sub-T', desc: '4×2000m (75초 휴식)', icon: '🔥', color: '#fbbf24' },
       'sub-t-long': { name: '긴 Sub-T', desc: '3×10분 (90초 휴식)', icon: '🔥', color: '#fbbf24' },
+      'sub-t': { name: 'Sub-T', desc: 'Sub-threshold 인터벌', icon: '🔥', color: '#fbbf24' },
       'easy': { name: 'Easy Run', desc: '40-60분 @ Easy 페이스', icon: '🚶', color: '#22c55e' },
       'long': { name: 'Long Run', desc: '90-120분 @ Easy 페이스', icon: '🏃', color: '#a78bfa' },
-      'rest': { name: '휴식', desc: '완전 휴식 또는 가벼운 활동', icon: '😴', color: '#64748b' }
+      'rest': { name: '휴식', desc: '완전 휴식 또는 가벼운 활동', icon: '😴', color: '#64748b' },
+      'race-hm': { name: '하프마라톤 대회', desc: '21.1km 대회/TT 기록', icon: '🏅', color: '#f87171' },
+      'race-fm': { name: '풀코스 대회', desc: '42.2km 대회 기록', icon: '🏅', color: '#f87171' },
+      'race-5k': { name: '5K TT', desc: '5km 타임트라이얼', icon: '🎯', color: '#34d399' },
+      'race-10k': { name: '10K TT', desc: '10km 타임트라이얼', icon: '🎯', color: '#34d399' }
     };
     
+    const RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+
     // 이번 주 훈련 기록 분석
     function analyzeThisWeek() {
       const today = new Date();
@@ -3105,34 +3187,38 @@
       const startOfWeek = new Date(today);
       startOfWeek.setDate(today.getDate() - dayOfWeek);
       startOfWeek.setHours(0, 0, 0, 0);
-      
+
       // 이번 주 운동 필터링 (워밍업/쿨다운 제외)
       const thisWeekWorkouts = workouts.filter(w => {
         if (w.type === 'warmup-cooldown') return false;
         const workoutDate = new Date(w.date);
         return workoutDate >= startOfWeek && workoutDate <= today;
       });
-      
+
       // 요일별 운동 매핑 (워밍업/쿨다운 제외)
       const workoutsByDay = {};
       thisWeekWorkouts.forEach(w => {
         const d = new Date(w.date);
         const day = d.getDay();
-        // 같은 날 여러 운동이 있으면 메인 운동(Sub-T > Long > Easy) 우선
+        // 같은 날 여러 운동이 있으면 메인 운동(Race > Sub-T > Long > Easy) 우선
         const existing = workoutsByDay[day];
-        if (!existing || 
-            (w.type === 'sub-t') ||
-            (w.type === 'long' && existing.type !== 'sub-t')) {
+        const isRace = RACE_TYPES.includes(w.type);
+        const existingIsRace = existing && RACE_TYPES.includes(existing.type);
+        if (!existing ||
+            isRace ||
+            (!existingIsRace && w.type === 'sub-t') ||
+            (!existingIsRace && w.type === 'long' && existing.type !== 'sub-t')) {
           workoutsByDay[day] = w;
         }
       });
-      
+
       return {
         workouts: thisWeekWorkouts,
         byDay: workoutsByDay,
         subTCount: thisWeekWorkouts.filter(w => w.type === 'sub-t').length,
         easyCount: thisWeekWorkouts.filter(w => w.type === 'easy').length,
         longCount: thisWeekWorkouts.filter(w => w.type === 'long').length,
+        raceCount: thisWeekWorkouts.filter(w => RACE_TYPES.includes(w.type)).length,
         dayOfWeek: dayOfWeek
       };
     }
@@ -3146,7 +3232,7 @@
       // 어제 운동 확인
       const yesterday = (today + 6) % 7;
       const yesterdayWorkout = analysis.byDay[yesterday];
-      const yesterdayWasHard = yesterdayWorkout && (yesterdayWorkout.type === 'sub-t' || yesterdayWorkout.type === 'long');
+      const yesterdayWasHard = yesterdayWorkout && (yesterdayWorkout.type === 'sub-t' || yesterdayWorkout.type === 'long' || RACE_TYPES.includes(yesterdayWorkout.type));
       
       // 예상 추천 계산 (실제 운동 전 기준)
       let expectedType = 'easy';
@@ -3240,8 +3326,8 @@
         const prev = analysis.byDay[days[i - 1]];
         const curr = analysis.byDay[days[i]];
         if (days[i] === days[i - 1] + 1) { // 연속된 날
-          const prevHard = prev && (prev.type === 'sub-t' || prev.type === 'long');
-          const currHard = curr && (curr.type === 'sub-t' || curr.type === 'long');
+          const prevHard = prev && (prev.type === 'sub-t' || prev.type === 'long' || RACE_TYPES.includes(prev.type));
+          const currHard = curr && (curr.type === 'sub-t' || curr.type === 'long' || RACE_TYPES.includes(curr.type));
           if (prevHard && currHard) {
             issues.push({
               type: 'consecutive_hard',
@@ -3540,7 +3626,7 @@
                 <div style="font-size: 11px; color: #64748b;">${dayNames[p.day]}</div>
                 <div style="font-size: 10px; color: #475569;">${p.date.getDate()}일</div>
                 <div style="font-size: 24px; margin: 6px 0;">${wType.icon}</div>
-                <div style="font-size: 10px; color: ${wType.color};">${p.type === 'sub-t' ? 'Sub-T' : p.type === 'long' ? 'Long' : p.type === 'rest' ? '휴식' : 'Easy'}</div>
+                <div style="font-size: 10px; color: ${wType.color};">${p.type === 'sub-t' ? 'Sub-T' : p.type === 'long' ? 'Long' : p.type === 'rest' ? '휴식' : p.type === 'race-hm' ? '하프대회' : p.type === 'race-fm' ? '풀코스' : p.type === 'race-5k' ? '5K TT' : p.type === 'race-10k' ? '10K TT' : 'Easy'}</div>
                 ${statusIcon ? `<div style="font-size: 12px; margin-top: 4px; color: ${p.status === 'completed' ? '#22c55e' : p.status === 'missed' ? '#64748b' : '#fbbf24'};">${statusIcon}</div>` : ''}
               </div>
             `;

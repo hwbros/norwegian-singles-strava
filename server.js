@@ -863,8 +863,9 @@ app.get('/api/schedule/analysis', async (req, res) => {
           const correction = corrections[a.id] || {};
           const actual = correction.type || classifyType(a, userMaxHR);
           
-          // warmup-cooldown은 비교에서 제외
+          // warmup-cooldown 및 race 타입은 비교에서 제외
           if (actual === 'warmup-cooldown') return;
+          if (['race-hm', 'race-fm', 'race-5k', 'race-10k'].includes(actual)) return;
           
           if (recommended !== actual) {
             mismatches.push({
@@ -1137,16 +1138,43 @@ function classifyType(a, userMaxHR = 190) {
   const duration = a.moving_time / 60;
   const avgHR = a.average_heartrate;
   const pace = a.average_speed ? 1000 / a.average_speed : 0; // 초/km
-  
+
   const hrPercent = avgHR ? (avgHR / userMaxHR) * 100 : 0;
-  
+
   // 0. 매우 짧은 활동 (15분 미만) → 워밍업/쿨다운으로 간주
   //    Sub-T 분석에서 제외됨
   if (duration < 15) {
     return 'warmup-cooldown';
   }
-  
-  // 1. 롱런 (85분 이상)
+
+  // 1. Race/TT 자동 감지 (이름 키워드 + 거리 기반)
+  const distKm = a.distance / 1000;
+  const nameLower = (a.name || '').toLowerCase();
+  const isRaceKeyword = nameLower.includes('대회') || nameLower.includes('race') ||
+                        nameLower.includes('레이스') || nameLower.includes('경기');
+  const isTTKeyword = nameLower.includes(' tt') || nameLower.includes('time trial') ||
+                      nameLower.includes('타임트라이얼') || nameLower.includes('타임 트라이얼');
+
+  // 풀코스 마라톤 (~42km)
+  if (distKm >= 40 && distKm <= 44 &&
+      (isRaceKeyword || nameLower.includes('마라톤') || nameLower.includes('marathon') || nameLower.includes('풀코스'))) {
+    return 'race-fm';
+  }
+  // 하프마라톤 (~21km)
+  if (distKm >= 19 && distKm <= 23 &&
+      (isRaceKeyword || nameLower.includes('하프') || nameLower.includes('half'))) {
+    return 'race-hm';
+  }
+  // 10K TT/레이스 (~10km)
+  if (distKm >= 9 && distKm <= 11.5 && (isRaceKeyword || isTTKeyword)) {
+    return 'race-10k';
+  }
+  // 5K TT/레이스 (~5km)
+  if (distKm >= 4.5 && distKm <= 5.5 && (isRaceKeyword || isTTKeyword)) {
+    return 'race-5k';
+  }
+
+  // 2. 롱런 (85분 이상)
   if (duration >= 85) return 'long';
   
   // 2. Easy Run 판단 - 여러 조건 중 하나라도 충족하면 Easy
