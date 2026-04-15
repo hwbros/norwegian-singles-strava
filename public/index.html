@@ -3772,7 +3772,10 @@
     }
 
     function isoDate(d) {
-      return d.toISOString().split('T')[0];
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
     }
 
     function getAvailableReportWeeks() {
@@ -3858,11 +3861,21 @@
 
       // Sub-T 효과 평가
       function evalSubT(w) {
-        const hr = w.intervalHR || w.avgHR;
-        if (!hr) return { badge: 'info', icon: '❓', text: 'HR 데이터 없음' };
-        if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', icon: '✅', text: `목표 HR 범위 (${hr}bpm)` };
-        if (hr < subTLowHR) return { badge: 'warning', icon: '⚠️', text: `HR 낮음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR})` };
-        return { badge: 'danger', icon: '🔴', text: `HR 높음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR})` };
+        if (w.intervalHR) {
+          // 인터벌 구간 HR (휴식 제외) — 신뢰도 높음
+          const hr = w.intervalHR;
+          if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', icon: '✅', text: `목표 HR 범위 (${hr}bpm, 인터벌 구간)` };
+          if (hr < subTLowHR) return { badge: 'warning', icon: '⚠️', text: `HR 낮음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR}, 인터벌 구간)` };
+          return { badge: 'danger', icon: '🔴', text: `HR 높음 – ${hr}bpm (목표: ${subTLowHR}~${subTHighHR}, 인터벌 구간)` };
+        }
+        if (w.avgHR) {
+          // 전체 평균 HR (휴식 구간 포함) — 실제보다 낮게 나올 수 있음
+          const hr = w.avgHR;
+          if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', icon: '✅', text: `목표 HR 범위 (${hr}bpm, 전체 평균¹)` };
+          if (hr < subTLowHR) return { badge: 'warning', icon: '⚠️', text: `HR 낮음 – ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR} (전체 평균¹)` };
+          return { badge: 'danger', icon: '🔴', text: `HR 높음 – ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR} (전체 평균¹)` };
+        }
+        return { badge: 'info', icon: '❓', text: 'HR 데이터 없음' };
       }
 
       // Easy 효과 평가
@@ -4125,7 +4138,7 @@
               <div style="padding: 14px; background: rgba(245,158,11,0.1); border-radius: 10px; border: 1px solid rgba(245,158,11,0.2);">
                 <div style="font-size:11px; color:#64748b; margin-bottom:4px;">HR 범위 내 세션</div>
                 <div style="font-size:16px; font-weight:700; color:${subTHRCompliance >= 70 ? '#22c55e' : '#f59e0b'};">${subTWithGoodHR.length}/${subTSessions.length}회</div>
-                <div style="font-size:11px; color:#64748b; margin-top:2px;">${subTHRCompliance !== null ? subTHRCompliance + '%' : '--'} 준수율</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">${subTHRCompliance !== null ? subTHRCompliance + '%' : '--'} 준수율 (${subTSessions.some(w => w.intervalHR) ? '인터벌 HR' : '전체 평균 HR¹'})</div>
               </div>
               ${subTSessions.some(w => w.intervalPace) ? `
               <div style="padding: 14px; background: rgba(245,158,11,0.1); border-radius: 10px; border: 1px solid rgba(245,158,11,0.2);">
@@ -4146,6 +4159,11 @@
                 </div>
               </div>`;
             }).join('')}
+            ${subTSessions.some(w => !w.intervalHR) ? `
+            <div style="margin-top: 8px; font-size: 12px; color: #64748b; padding: 8px 12px; background: rgba(30,41,59,0.4); border-radius: 8px;">
+              ¹ <strong style="color: #94a3b8;">전체 평균 HR</strong>은 휴식 구간을 포함하므로 실제 인터벌 강도보다 낮게 나올 수 있습니다.
+              운동 기록 탭에서 <strong style="color: #94a3b8;">인터벌 구간 HR</strong>을 직접 입력하면 더 정확한 평가가 가능합니다.
+            </div>` : ''}
           </div>` : ''}
 
           ${easySessions.length > 0 ? `
