@@ -3806,7 +3806,7 @@
       });
     }
 
-    function renderWeeklyReport() {
+    async function renderWeeklyReport() {
       const container = document.getElementById('weeklyReportContent');
       if (!container) return;
 
@@ -3831,6 +3831,31 @@
       const weekWorkouts = getWorkoutsForWeek(selectedReportWeekKey);
       const mainWorkouts = weekWorkouts.filter(w => w.type !== 'warmup-cooldown');
       const _RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+
+      // ── Sub-T 세션의 인터벌 HR 자동 보완 ──
+      // 랩 상세에서 이미 계산된 intervalAnalysis.avgHR 을 workouts 배열에 캐싱
+      const subTNeedingHR = mainWorkouts.filter(w => w.type === 'sub-t' && !w.intervalHR && !w._intervalHRFetched);
+      if (subTNeedingHR.length > 0) {
+        container.innerHTML = `<div class="loading"><div class="spinner"></div><p>인터벌 HR 데이터를 불러오는 중...</p></div>`;
+        await Promise.all(subTNeedingHR.map(async w => {
+          w._intervalHRFetched = true; // 재호출 방지
+          try {
+            const res = await fetch(`${API_BASE}/api/strava/activity/${w.id}`, { credentials: 'include' });
+            const data = await res.json();
+            if (data.success && data.intervalStats?.avgHR) {
+              // workouts 배열 원본에도 반영 (캐싱)
+              const orig = workouts.find(x => x.id == w.id);
+              if (orig) orig.intervalHR = data.intervalStats.avgHR;
+              w.intervalHR = data.intervalStats.avgHR;
+            }
+          } catch (e) {
+            console.error('[WeeklyReport] intervalHR fetch 실패:', w.id, e);
+          }
+        }));
+        // fetch 완료 후 다시 렌더
+        renderWeeklyReport();
+        return;
+      }
 
       // ── 주간 통계 계산 ──
       const subTSessions = mainWorkouts.filter(w => w.type === 'sub-t');
@@ -4162,7 +4187,7 @@
             ${subTSessions.some(w => !w.intervalHR) ? `
             <div style="margin-top: 8px; font-size: 12px; color: #64748b; padding: 8px 12px; background: rgba(30,41,59,0.4); border-radius: 8px;">
               ¹ <strong style="color: #94a3b8;">전체 평균 HR</strong>은 휴식 구간을 포함하므로 실제 인터벌 강도보다 낮게 나올 수 있습니다.
-              운동 기록 탭에서 <strong style="color: #94a3b8;">인터벌 구간 HR</strong>을 직접 입력하면 더 정확한 평가가 가능합니다.
+              랩 데이터가 없는 활동은 자동 계산이 불가능합니다.
             </div>` : ''}
           </div>` : ''}
 
