@@ -11,6 +11,8 @@ services:
         value: production
       - key: SESSION_SECRET
         generateValue: true
+      - key: STRAVA_VERIFY_TOKEN
+        generateValue: true
       - key: STRAVA_CLIENT_ID
         sync: false
       - key: STRAVA_CLIENT_SECRET

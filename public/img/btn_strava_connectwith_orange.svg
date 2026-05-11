@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="193" height="48" viewBox="0 0 193 48">
+  <rect width="193" height="48" rx="4" fill="#FC4C02"/>
+  <path d="M22.3 34l-3.9-7.7h-6.4L22.3 46l10-19.7h-6.4" fill="#fff"/>
+  <path d="M12 26.3l5.3 10.5h8.1L12 13.8 0 36.8h8.1" fill="#fff"/>
+  <text x="46" y="19" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="rgba(255,255,255,0.9)" letter-spacing="0.5">Connect with</text>
+  <text x="46" y="37" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#fff" letter-spacing="0.5">STRAVA</text>
+</svg>

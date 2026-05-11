@@ -20,6 +20,7 @@ const PORT = process.env.PORT || 3000;
 // Strava API 설정
 const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+const STRAVA_VERIFY_TOKEN = process.env.STRAVA_VERIFY_TOKEN || 'norwegian-strava-webhook-verify';
 
 // Supabase 설정
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,6 +32,53 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   console.log('Supabase connected');
 } else {
   console.log('Supabase not configured - using session storage (not persistent)');
+}
+
+// ===== stravaFetch: Rate-limit-aware Strava v3 API wrapper =====
+
+const rateLimitState = { usage15min: null, usageDaily: null, limit15min: null, limitDaily: null };
+
+async function stravaFetch(url, options = {}, retries = 3) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, options);
+
+    const limitHdr = response.headers.get('X-RateLimit-Limit');
+    const usageHdr = response.headers.get('X-RateLimit-Usage');
+    if (limitHdr && usageHdr) {
+      const [l15, lDay] = limitHdr.split(',').map(s => parseInt(s.trim(), 10));
+      const [u15, uDay] = usageHdr.split(',').map(s => parseInt(s.trim(), 10));
+      Object.assign(rateLimitState, { limit15min: l15, limitDaily: lDay, usage15min: u15, usageDaily: uDay });
+      console.log(`[RateLimit] 15min: ${u15}/${l15}  Daily: ${uDay}/${lDay}`);
+    }
+
+    if (response.status !== 429) return response;
+
+    if (attempt === retries) {
+      console.error(`[stravaFetch] 429 — max retries exceeded: ${url}`);
+      return response;
+    }
+    const retryAfter = parseInt(response.headers.get('Retry-After') || '60', 10);
+    console.warn(`[stravaFetch] 429 — waiting ${retryAfter}s (attempt ${attempt + 1}/${retries})`);
+    await new Promise(r => setTimeout(r, retryAfter * 1000));
+  }
+}
+
+// ===== In-memory activities cache =====
+
+const activitiesCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function getCachedActivities(athleteId) {
+  const entry = activitiesCache.get(String(athleteId));
+  if (!entry || Date.now() > entry.expiresAt) { activitiesCache.delete(String(athleteId)); return null; }
+  return entry.data;
+}
+function setCachedActivities(athleteId, data) {
+  activitiesCache.set(String(athleteId), { data, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+function invalidateCache(athleteId) {
+  activitiesCache.delete(String(athleteId));
+  console.log(`[Cache] Invalidated for athlete ${athleteId}`);
 }
 
 // BASE_URL 결정 함수 (요청 시점에 동적으로 결정)
@@ -249,6 +297,80 @@ app.post('/api/strava/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// ===== Webhook =====
+
+app.get('/api/webhook', (req, res) => {
+  const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
+  if (mode === 'subscribe' && token === STRAVA_VERIFY_TOKEN) {
+    console.log('[Webhook] Verification handshake accepted');
+    return res.json({ 'hub.challenge': challenge });
+  }
+  console.warn('[Webhook] Verification failed — token mismatch or wrong mode');
+  res.status(403).json({ error: 'Forbidden' });
+});
+
+app.post('/api/webhook', (req, res) => {
+  res.status(200).send('EVENT_RECEIVED');
+  setImmediate(async () => {
+    try {
+      const { object_type, owner_id } = req.body;
+      console.log('[Webhook] Event received:', JSON.stringify(req.body));
+      if (object_type === 'activity' && owner_id) invalidateCache(owner_id);
+    } catch (err) {
+      console.error('[Webhook] Async processing error:', err);
+    }
+  });
+});
+
+app.post('/api/webhook/subscribe', async (req, res) => {
+  try {
+    const callbackUrl = `${getBaseUrl(req)}/api/webhook`;
+    const body = new URLSearchParams({
+      client_id: STRAVA_CLIENT_ID,
+      client_secret: STRAVA_CLIENT_SECRET,
+      callback_url: callbackUrl,
+      verify_token: STRAVA_VERIFY_TOKEN
+    });
+    const r = await fetch('https://www.strava.com/api/v3/push_subscriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    const data = await r.json();
+    r.ok ? res.json({ success: true, subscription: data }) : res.status(r.status).json({ error: data });
+  } catch (err) {
+    console.error('[Webhook] Subscribe error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+app.get('/api/webhook/status', async (req, res) => {
+  try {
+    const r = await fetch(`https://www.strava.com/api/v3/push_subscriptions?client_id=${STRAVA_CLIENT_ID}&client_secret=${STRAVA_CLIENT_SECRET}`);
+    res.json({ subscriptions: await r.json() });
+  } catch (err) {
+    console.error('[Webhook] Status error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+app.delete('/api/webhook/unsubscribe', async (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'id query param required' });
+  try {
+    const body = new URLSearchParams({ client_id: STRAVA_CLIENT_ID, client_secret: STRAVA_CLIENT_SECRET });
+    const r = await fetch(`https://www.strava.com/api/v3/push_subscriptions/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    r.status === 204 ? res.json({ success: true }) : res.status(r.status).json({ error: 'Deletion failed' });
+  } catch (err) {
+    console.error('[Webhook] Unsubscribe error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // ===== 활동 데이터 API =====
 
 app.get('/api/strava/activities', async (req, res) => {
@@ -261,22 +383,31 @@ app.get('/api/strava/activities', async (req, res) => {
   try {
     const perPage = parseInt(req.query.limit) || 30;
     const athleteId = req.session.strava?.athlete?.id;
-    
+    const forceRefresh = req.query.refresh === 'true';
+
+    if (!forceRefresh && athleteId) {
+      const cached = getCachedActivities(athleteId);
+      if (cached) {
+        console.log(`[Cache] HIT for athlete ${athleteId}`);
+        return res.json({ ...cached, fromCache: true });
+      }
+    }
+
     // 사용자 설정 조회
     const userSettings = await getUserSettings(athleteId, req.session);
     const userMaxHR = userSettings.maxHR;
-    
-    const response = await fetch(
+
+    const response = await stravaFetch(
       `https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`,
       { headers: { 'Authorization': `Bearer ${token}` } }
     );
-    
+
     if (!response.ok) {
       throw new Error(`Strava API 에러: ${response.status}`);
     }
-    
+
     const activities = await response.json();
-    
+
     // 모든 활동의 correction을 한 번에 조회
     const corrections = await getAllCorrections(athleteId, activities.map(a => a.id), req.session);
     
@@ -319,7 +450,12 @@ app.get('/api/strava/activities', async (req, res) => {
         };
       });
     
-    res.json({ success: true, activities: formatted, userMaxHR: userMaxHR });
+    const result = { success: true, activities: formatted, userMaxHR: userMaxHR };
+    if (athleteId) {
+      setCachedActivities(athleteId, result);
+      console.log(`[Cache] SET for athlete ${athleteId}`);
+    }
+    res.json(result);
   } catch (error) {
     console.error('활동 조회 에러:', error);
     res.status(500).json({ error: '활동을 가져오는 중 오류가 발생했습니다.' });
@@ -342,9 +478,9 @@ app.get('/api/strava/activity/:id', async (req, res) => {
     const userMaxHR = userSettings.maxHR;
     
     const [activityRes, lapsRes] = await Promise.all([
-      fetch(`https://www.strava.com/api/v3/activities/${req.params.id}`, 
+      stravaFetch(`https://www.strava.com/api/v3/activities/${req.params.id}`,
         { headers: { 'Authorization': `Bearer ${token}` } }),
-      fetch(`https://www.strava.com/api/v3/activities/${req.params.id}/laps`, 
+      stravaFetch(`https://www.strava.com/api/v3/activities/${req.params.id}/laps`,
         { headers: { 'Authorization': `Bearer ${token}` } })
     ]);
     
@@ -830,7 +966,7 @@ app.get('/api/schedule/analysis', async (req, res) => {
     const userSettings = await getUserSettings(athleteId, req.session);
     const userMaxHR = userSettings.maxHR;
     
-    const response = await fetch(
+    const response = await stravaFetch(
       `https://www.strava.com/api/v3/athlete/activities?per_page=14`,
       { headers: { 'Authorization': `Bearer ${token}` } }
     );
