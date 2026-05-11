@@ -12,6 +12,7 @@ const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -81,6 +82,41 @@ function invalidateCache(athleteId) {
   console.log(`[Cache] Invalidated for athlete ${athleteId}`);
 }
 
+// ===== Webhook Signature Verification =====
+
+function verifyStravaSignature(req) {
+  const sigHeader = req.headers['x-strava-signature'];
+  if (!sigHeader) {
+    console.warn('[Webhook] X-Strava-Signature absent — skipping verification');
+    return true;
+  }
+  try {
+    const parts = {};
+    sigHeader.split(',').forEach(part => {
+      const [k, v] = part.split('=');
+      parts[k.trim()] = v.trim();
+    });
+    const { t: timestamp, v1 } = parts;
+    if (!timestamp || !v1) return false;
+
+    if (Math.abs(Date.now() / 1000 - parseInt(timestamp, 10)) > 300) {
+      console.warn('[Webhook] Signature timestamp out of range — possible replay attack');
+      return false;
+    }
+
+    const rawBody = req.rawBody?.toString() || '';
+    const expected = crypto
+      .createHmac('sha256', STRAVA_CLIENT_SECRET)
+      .update(`${timestamp}.${rawBody}`)
+      .digest('hex');
+
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+  } catch (err) {
+    console.error('[Webhook] Signature verification error:', err);
+    return false;
+  }
+}
+
 // BASE_URL 결정 함수 (요청 시점에 동적으로 결정)
 function getBaseUrl(req) {
   // 환경 변수에 명시적으로 설정된 경우 우선 사용
@@ -113,7 +149,11 @@ console.log('====================');
 
 // 미들웨어
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    if (req.path === '/api/webhook') req.rawBody = buf;
+  }
+}));
 app.use(express.static('public'));
 
 // 세션 설정 - Render 환경에 맞게 조정
@@ -310,6 +350,10 @@ app.get('/api/webhook', (req, res) => {
 });
 
 app.post('/api/webhook', (req, res) => {
+  if (!verifyStravaSignature(req)) {
+    console.warn('[Webhook] Signature verification failed — ignoring event');
+    return res.status(401).send('INVALID_SIGNATURE');
+  }
   res.status(200).send('EVENT_RECEIVED');
   setImmediate(async () => {
     try {
