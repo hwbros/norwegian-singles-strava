@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(node -e ':*)",
-      "Bash(node.exe -e \"const src = require\\('fs'\\).readFileSync\\('c:/work/norwegian-singles-strava/server.js', 'utf8'\\); ['totalEffectiveKm','hasLapCorrections','stravaAvgPace','analysis.hasLapCorrections'].forEach\\(c => console.log\\(\\(src.match\\(new RegExp\\(c,'g'\\)\\)||[]\\).length + 'x ' + c\\)\\);\")"
+      "Bash(node.exe -e \"const src = require\\('fs'\\).readFileSync\\('c:/work/norwegian-singles-strava/server.js', 'utf8'\\); ['totalEffectiveKm','hasLapCorrections','stravaAvgPace','analysis.hasLapCorrections'].forEach\\(c => console.log\\(\\(src.match\\(new RegExp\\(c,'g'\\)\\)||[]\\).length + 'x ' + c\\)\\);\")",
+      "Bash(npx skills@latest *)",
+      "Bash(git add *)"
     ]
   }
 }

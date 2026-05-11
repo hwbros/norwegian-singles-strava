@@ -272,3 +272,19 @@ git push origin main
 - [ ] 계정 삭제 기능
 - [ ] PWA 지원 (오프라인)
 - [ ] 훈련 히스토리 그래프
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (gh CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo — `CONTEXT.md` + `docs/adr/` at the root. See `docs/agents/domain.md`.
