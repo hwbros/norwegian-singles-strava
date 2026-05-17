@@ -1634,9 +1634,7 @@ app.post('/api/report/weekly', async (req, res) => {
       ]
     });
     const page = await browser.newPage();
-    if (format === 'png') {
-      await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
-    }
+    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
 
     const filename = `weekly-report-${weekStart}`;
@@ -1646,7 +1644,9 @@ app.post('/api/report/weekly', async (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
       res.send(pdf);
     } else {
-      const png = await page.screenshot({ type: 'png', fullPage: true });
+      const contentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      await page.setViewport({ width: 794, height: contentHeight, deviceScaleFactor: 2 });
+      const png = await page.screenshot({ type: 'png' });
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.png"`);
       res.send(png);
