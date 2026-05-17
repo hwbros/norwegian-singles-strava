@@ -36,7 +36,16 @@
       "Bash(git -C /home/hwbros/work/norwegian-singles-strava status)",
       "Bash(git -C /home/hwbros/work/norwegian-singles-strava diff)",
       "Bash(git -C /home/hwbros/work/norwegian-singles-strava add nginx-nssapp.conf .claude/settings.local.json)",
-      "Bash(git -C /home/hwbros/work/norwegian-singles-strava log --oneline -3)"
+      "Bash(git -C /home/hwbros/work/norwegian-singles-strava log --oneline -3)",
+      "Bash(git *)",
+      "Bash(node *)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(kill 553115)",
+      "Bash(PORT=3001 node /home/hwbros/work/norwegian-singles-strava/server.js)",
+      "WebFetch(domain:developers.strava.com)",
+      "Bash(npm install *)",
+      "Bash(sudo apt-get install -y libatk-bridge2.0-0 libatk1.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2 libgtk-3-0 libnss3 libxss1 libgconf-2-4)",
+      "Bash(ldd /home/hwbros/.cache/puppeteer/chrome-headless-shell/linux-121.0.6167.85/chrome-headless-shell-linux64/chrome-headless-shell)"
     ]
   }
 }
