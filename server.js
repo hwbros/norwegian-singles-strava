@@ -1538,7 +1538,7 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
 <meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body style="width:794px;min-height:1123px;overflow:hidden;font-family:'Noto Sans KR','Malgun Gothic','Noto Color Emoji',sans-serif;background:#ffffff;color:#1e293b;padding:32px;font-size:12px;margin:0;box-sizing:border-box;">
+<body style="width:794px;min-height:0;overflow-x:hidden;font-family:'Noto Sans KR','Malgun Gothic','Noto Color Emoji',sans-serif;background:#ffffff;color:#1e293b;padding:32px;font-size:12px;margin:0;box-sizing:border-box;">
 
 <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:16px;overflow:hidden;">
   <h1 style="font-size:18px;font-weight:700;color:#0f172a;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">${reportWeekLabel(weekStart)}</h1>
@@ -1646,7 +1646,7 @@ app.post('/api/report/weekly', async (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
       res.send(pdf);
     } else {
-      const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 794, height: 1123 } });
+      const png = await page.screenshot({ type: 'png', fullPage: true });
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.png"`);
       res.send(png);
