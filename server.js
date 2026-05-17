@@ -1697,6 +1697,224 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR, userR
 </html>`;
 }
 
+function generateMobileReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR, userRestingHR }) {
+  const RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+  const workouts = (rawWorkouts || [])
+    .filter(w => w.type !== 'warmup-cooldown')
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const maxHR = userMaxHR || 190;
+  const restHR = userRestingHR || 60;
+
+  const subTSessions = workouts.filter(w => w.type === 'sub-t');
+  const easySessions = workouts.filter(w => w.type === 'easy');
+  const longSessions = workouts.filter(w => w.type === 'long');
+  const totalDist = workouts.reduce((s, w) => s + parseFloat(w.distance || 0), 0);
+  const totalTime = workouts.reduce((s, w) => s + (w.duration || 0), 0);
+  const qualityTime = subTSessions.reduce((s, w) => s + (w.duration || 0) * 0.6, 0);
+  const qualityPct = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+
+  const subTLowHR = Math.round(restHR + (maxHR - restHR) * 0.82);
+  const subTHighHR = Math.round(restHR + (maxHR - restHR) * 0.88);
+  const easyMaxHR = Math.round(maxHR * 0.70);
+
+  const evalSubT = w => {
+    const hr = w.intervalHR || w.avgHR;
+    if (!hr) return { badge: 'info', text: 'HR 데이터 없음' };
+    const label = w.intervalHR ? '인터벌 HR' : '전체 평균';
+    if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', text: `목표 범위 (${hr}bpm, ${label})` };
+    if (hr < subTLowHR) return { badge: 'warn', text: `HR 낮음 ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR}` };
+    return { badge: 'danger', text: `HR 높음 ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR}` };
+  };
+  const evalEasy = w => {
+    if (!w.avgHR) return { badge: 'info', text: 'HR 데이터 없음' };
+    if (w.avgHR <= easyMaxHR) return { badge: 'good', text: `HR 준수 (${w.avgHR}bpm)` };
+    return { badge: 'warn', text: `HR 초과 ${w.avgHR}bpm (목표 ≤${easyMaxHR})` };
+  };
+  const evalLong = w => {
+    if (w.duration >= 90) return { badge: 'good', text: `${w.duration}분 — 충분` };
+    if (w.duration >= 70) return { badge: 'warn', text: `${w.duration}분 — 85분 이상 권장` };
+    return { badge: 'danger', text: `${w.duration}분 — 짧음` };
+  };
+
+  const badgeBg = { good: '#dcfce7', warn: '#fef9c3', danger: '#fee2e2', info: '#f1f5f9' };
+  const badgeColor = { good: '#16a34a', warn: '#854d0e', danger: '#b91c1c', info: '#64748b' };
+
+  const easyTooHard = easySessions.filter(w => w.avgHR && w.avgHR > easyMaxHR).length;
+  const feedbacks = [];
+  if (subTSessions.length === 0) feedbacks.push({ badge: 'danger', title: 'Sub-T 세션 없음', text: '이번 주 Sub-T가 없었습니다. 2-3회를 포함해보세요.' });
+  else if (subTSessions.length >= 2) feedbacks.push({ badge: 'good', title: `Sub-T ${subTSessions.length}회 완료`, text: '권장 횟수를 충족했습니다.' });
+  else feedbacks.push({ badge: 'warn', title: `Sub-T ${subTSessions.length}회`, text: '2-3회를 목표로 해보세요.' });
+
+  if (easyTooHard > 0) feedbacks.push({ badge: 'danger', title: `이지런 HR 초과 ${easyTooHard}회`, text: `${easyTooHard}회에서 ${easyMaxHR}bpm 초과.` });
+  else if (easySessions.length > 0) feedbacks.push({ badge: 'good', title: '이지런 HR 준수', text: '모든 이지런 HR 정상.' });
+
+  if (longSessions.length === 0 && workouts.length >= 3) feedbacks.push({ badge: 'warn', title: '롱런 없음', text: '주 1회 85분 이상 롱런을 권장합니다.' });
+  else if (longSessions.length > 0) feedbacks.push({ badge: 'good', title: '롱런 완료', text: `${longSessions.length}회 롱런 포함.` });
+
+  if (qualityPct > 30) feedbacks.push({ badge: 'danger', title: `퀄리티 볼륨 과다 (${qualityPct}%)`, text: 'Easy 비중을 늘려주세요.' });
+  else if (qualityPct >= 18 && qualityPct <= 27) feedbacks.push({ badge: 'good', title: `퀄리티 볼륨 적정 (${qualityPct}%)`, text: '20-25% 범위 내.' });
+  else if (qualityPct > 0) feedbacks.push({ badge: 'warn', title: `퀄리티 볼륨 낮음 (${qualityPct}%)`, text: '20-25%를 목표로 Sub-T 볼륨 조정.' });
+
+  const fmtDist = d => parseFloat(d || 0).toFixed(1);
+  const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+  const typeName = t => ({ 'sub-t': 'Sub-T', 'easy': '이지런', 'long': '롱런', 'race-hm': '대회(HM)', 'race-fm': '대회(FM)', 'race-5k': '대회(5K)', 'race-10k': '대회(10K)' }[t] || escapeHtml(t));
+  const typeBg = t => ({ 'sub-t': '#fef3c7', 'easy': '#dcfce7', 'long': '#ede9fe' }[t] || (RACE_TYPES.includes(t) ? '#dbeafe' : '#f1f5f9'));
+  const typeColor = t => ({ 'sub-t': '#d97706', 'easy': '#16a34a', 'long': '#7c3aed' }[t] || (RACE_TYPES.includes(t) ? '#1d4ed8' : '#64748b'));
+  const dayBg = t => ({ 'sub-t': '#fff7ed', 'easy': '#f0fdf4', 'long': '#faf5ff' }[t] || (RACE_TYPES.includes(t) ? '#eff6ff' : '#f8fafc'));
+  const typeIcon = t => ({ 'sub-t': '🔥', 'easy': '🚶', 'long': '🏃' }[t] || (RACE_TYPES.includes(t) ? '🏅' : '▶'));
+  const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+  const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
+
+  const weekStartDate = new Date(weekStart + 'T00:00:00');
+  const dayMap = {};
+  workouts.forEach(w => {
+    const diff = Math.round((new Date(w.date + 'T00:00:00') - weekStartDate) / 86400000);
+    if (diff >= 0 && diff < 7) {
+      if (!dayMap[diff]) dayMap[diff] = [];
+      dayMap[diff].push(w);
+    }
+  });
+
+  const now = new Date();
+  const generatedAt = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')} 생성`;
+
+  const dayGridHTML = Array.from({ length: 7 }, (_, i) => {
+    const dayWorkouts = dayMap[i] || [];
+    const mainW = dayWorkouts.find(w => w.type === 'sub-t') ||
+                  dayWorkouts.find(w => RACE_TYPES.includes(w.type)) ||
+                  dayWorkouts.find(w => w.type === 'long') ||
+                  dayWorkouts.find(w => w.type === 'easy') ||
+                  dayWorkouts[0];
+    const bg = mainW ? dayBg(mainW.type) : '#f8fafc';
+    const border = mainW ? `1px solid ${typeBg(mainW.type)}` : '1px solid #e2e8f0';
+    return `<div style="background:${bg};border:${border};border-radius:8px;padding:6px 2px;text-align:center;">
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:2px;">${DAY_NAMES[i]}</div>
+      <div style="font-size:20px;line-height:1.2;">${mainW ? typeIcon(mainW.type) : '–'}</div>
+      <div style="font-size:10px;color:#64748b;margin-top:2px;">${mainW ? fmtDist(mainW.distance) + 'km' : ''}</div>
+    </div>`;
+  }).join('');
+
+  const workoutCardsHTML = workouts.map(w => {
+    const dateObj = new Date(w.date + 'T00:00:00');
+    const dateStr = `${dateObj.getMonth() + 1}/${dateObj.getDate()}(${DAY_KO[dateObj.getDay()]})`;
+    const pace = escapeHtml(w.correctedPace || w.avgPace || '–');
+    return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;color:#64748b;">${dateStr}</span>
+          <span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:700;background:${typeBg(w.type)};color:${typeColor(w.type)};">${typeName(w.type)}</span>
+        </div>
+      </div>
+      <div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(w.name || '')}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+        <div style="text-align:center;padding:8px 4px;background:#ffffff;border-radius:8px;border:1px solid #f1f5f9;">
+          <div style="font-size:16px;font-weight:700;color:#3b82f6;">${fmtDist(w.distance)}<span style="font-size:11px;font-weight:400;">km</span></div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:2px;">거리</div>
+        </div>
+        <div style="text-align:center;padding:8px 4px;background:#ffffff;border-radius:8px;border:1px solid #f1f5f9;">
+          <div style="font-size:16px;font-weight:700;color:#0f172a;">${fmtMin(w.duration)}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:2px;">시간</div>
+        </div>
+        <div style="text-align:center;padding:8px 4px;background:#ffffff;border-radius:8px;border:1px solid #f1f5f9;">
+          <div style="font-size:16px;font-weight:700;color:#0f172a;">${pace}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:2px;">페이스</div>
+        </div>
+        <div style="text-align:center;padding:8px 4px;background:#ffffff;border-radius:8px;border:1px solid #f1f5f9;">
+          <div style="font-size:16px;font-weight:700;color:#ef4444;">${w.avgHR ? w.avgHR : '–'}<span style="font-size:11px;font-weight:400;">${w.avgHR ? 'bpm' : ''}</span></div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:2px;">평균HR</div>
+        </div>
+      </div>
+      ${w.type === 'sub-t' && w.intervalPace ? `<div style="margin-top:8px;padding:6px 10px;background:#fff7ed;border-radius:8px;font-size:12px;color:#d97706;">인터벌 페이스 <strong>${escapeHtml(w.intervalPace)}/km</strong></div>` : ''}
+    </div>`;
+  }).join('');
+
+  const effectCardsHTML = workouts
+    .filter(w => ['sub-t', 'easy', 'long'].includes(w.type) || RACE_TYPES.includes(w.type))
+    .map(w => {
+      let ev = null;
+      if (w.type === 'sub-t') ev = evalSubT(w);
+      else if (w.type === 'easy') ev = evalEasy(w);
+      else if (w.type === 'long') ev = evalLong(w);
+      else if (RACE_TYPES.includes(w.type)) ev = { badge: 'info', text: '대회 / TT 기록' };
+      if (!ev) return '';
+      const dateObj = new Date(w.date + 'T00:00:00');
+      const dateStr = `${dateObj.getMonth() + 1}/${dateObj.getDate()}(${DAY_KO[dateObj.getDay()]})`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;margin-bottom:8px;border-left:3px solid ${badgeColor[ev.badge]};">
+        <div style="flex-shrink:0;">
+          <div style="font-size:11px;color:#94a3b8;">${dateStr}</div>
+          <span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;background:${typeBg(w.type)};color:${typeColor(w.type)};">${typeName(w.type)}</span>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(w.name || '')}</div>
+          <div style="font-size:12px;font-weight:600;color:${badgeColor[ev.badge]};margin-top:2px;">${escapeHtml(ev.text)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+  const feedbackCardsHTML = feedbacks.map(f => `
+    <div style="padding:12px 14px;border-radius:10px;background:${badgeBg[f.badge]};border-left:3px solid ${badgeColor[f.badge]};margin-bottom:8px;">
+      <div style="font-size:13px;font-weight:700;color:${badgeColor[f.badge]};margin-bottom:3px;">${escapeHtml(f.title)}</div>
+      <div style="font-size:12px;color:#475569;">${escapeHtml(f.text)}</div>
+    </div>`).join('');
+
+  const sectionTitle = text => `<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin:16px 0 8px;">${text}</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body style="width:390px;min-height:0;overflow-x:hidden;font-family:'Noto Sans KR','Malgun Gothic','Noto Color Emoji',sans-serif;background:#ffffff;color:#1e293b;padding:20px;font-size:14px;margin:0;box-sizing:border-box;">
+
+<div style="border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:14px;">
+  <div style="font-size:15px;font-weight:700;color:#0f172a;line-height:1.3;">${reportWeekLabel(weekStart)}</div>
+  <div style="font-size:10px;color:#94a3b8;margin-top:4px;">${generatedAt}</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:28px;font-weight:700;color:#3b82f6;line-height:1;margin-bottom:4px;">${fmtDist(totalDist)}<span style="font-size:14px;font-weight:400;">km</span></div>
+    <div style="font-size:11px;color:#64748b;">총 거리</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:28px;font-weight:700;color:#0f172a;line-height:1;margin-bottom:4px;">${fmtMin(totalTime)}</div>
+    <div style="font-size:11px;color:#64748b;">총 훈련 시간</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:28px;font-weight:700;color:#d97706;line-height:1;margin-bottom:4px;">${subTSessions.length}</div>
+    <div style="font-size:11px;color:#64748b;">Sub-T 세션</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:28px;font-weight:700;color:${qualityPct >= 18 && qualityPct <= 27 ? '#16a34a' : '#d97706'};line-height:1;margin-bottom:4px;">${qualityPct}<span style="font-size:15px;font-weight:400;">%</span></div>
+    <div style="font-size:11px;color:#64748b;">퀄리티 볼륨</div>
+  </div>
+</div>
+
+${sectionTitle('훈련 구조')}
+<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">
+  ${dayGridHTML}
+</div>
+
+${sectionTitle('훈련 목록')}
+${workoutCardsHTML}
+
+${sectionTitle('훈련 효과 분석')}
+${effectCardsHTML}
+
+${sectionTitle('주간 총평')}
+${feedbackCardsHTML}
+
+<div style="margin-top:16px;padding-top:10px;border-top:1px solid #f1f5f9;display:flex;justify-content:space-between;font-size:10px;color:#cbd5e1;">
+  <span>Norwegian Singles Method Training App</span>
+  <span>Powered by Strava</span>
+</div>
+
+</body>
+</html>`;
+}
+
 app.post('/api/report/weekly', async (req, res) => {
   if (!req.session.strava?.athlete) {
     return res.status(401).json({ error: '로그인이 필요합니다.' });
@@ -1706,11 +1924,15 @@ app.post('/api/report/weekly', async (req, res) => {
   }
 
   const { weekStart, format, workouts, userMaxHR, userRestingHR } = req.body;
-  if (!workouts || !weekStart || !['png', 'pdf'].includes(format)) {
+  if (!workouts || !weekStart || !['png', 'pdf', 'mobile-png'].includes(format)) {
     return res.status(400).json({ error: '필수 파라미터 누락 또는 잘못된 형식' });
   }
 
-  const html = generateReportHTML({ weekStart, workouts, userMaxHR: userMaxHR || 190, userRestingHR: userRestingHR || 60 });
+  const opts = { weekStart, workouts, userMaxHR: userMaxHR || 190, userRestingHR: userRestingHR || 60 };
+  const html = format === 'mobile-png'
+    ? generateMobileReportHTML(opts)
+    : generateReportHTML(opts);
+
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -1726,22 +1948,33 @@ app.post('/api/report/weekly', async (req, res) => {
       ]
     });
     const page = await browser.newPage();
-    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
 
-    const filename = `weekly-report-${weekStart}`;
-    if (format === 'pdf') {
-      const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
-      res.send(pdf);
-    } else {
+    if (format === 'mobile-png') {
+      await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 3 });
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
       const contentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
-      await page.setViewport({ width: 794, height: contentHeight, deviceScaleFactor: 2 });
+      await page.setViewport({ width: 390, height: contentHeight, deviceScaleFactor: 3 });
       const png = await page.screenshot({ type: 'png' });
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}.png"`);
+      res.setHeader('Content-Disposition', `attachment; filename="weekly-report-${weekStart}-mobile.png"`);
       res.send(png);
+    } else {
+      await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+      const filename = `weekly-report-${weekStart}`;
+      if (format === 'pdf') {
+        const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+        res.send(pdf);
+      } else {
+        const contentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+        await page.setViewport({ width: 794, height: contentHeight, deviceScaleFactor: 2 });
+        const png = await page.screenshot({ type: 'png' });
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}.png"`);
+        res.send(png);
+      }
     }
   } catch (err) {
     console.error('[Report] 생성 오류:', err);

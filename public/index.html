@@ -4004,6 +4004,7 @@
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(71,85,105,0.2);">
             <button id="report-dl-png" onclick="downloadWeeklyReport('png')" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px;">↓ PNG</button>
             <button id="report-dl-pdf" onclick="downloadWeeklyReport('pdf')" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px;">↓ PDF</button>
+            <button id="report-dl-mobile-png" onclick="downloadWeeklyReport('mobile-png')" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px;">↓ 모바일 PNG</button>
           </div>
         </div>
 
@@ -4285,7 +4286,9 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `weekly-report-${selectedReportWeekKey}.${format}`;
+        a.download = format === 'mobile-png'
+          ? `weekly-report-${selectedReportWeekKey}-mobile.png`
+          : `weekly-report-${selectedReportWeekKey}.${format}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -4293,7 +4296,8 @@
       } catch (err) {
         alert(`리포트 생성 실패: ${err.message}`);
       } finally {
-        if (btn) { btn.textContent = originalText; btn.disabled = false; }
+        const btnLabels = { 'png': '↓ PNG', 'pdf': '↓ PDF', 'mobile-png': '↓ 모바일 PNG' };
+        if (btn) { btn.textContent = btnLabels[format] || originalText; btn.disabled = false; }
       }
     }
 
