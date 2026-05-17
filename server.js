@@ -1515,7 +1515,7 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
     const intervalPace = w.type === 'sub-t' ? escapeHtml(w.intervalPace || '–') : '';
     const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
     const td = (content, align = 'left', extra = '') =>
-      `<td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:${align};white-space:nowrap;vertical-align:middle;${extra}">${content}</td>`;
+      `<td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:${align};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;${extra}">${content}</td>`;
 
     return `<tr>
       ${td(dateStr)}
@@ -1538,11 +1538,11 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
 <meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body style="width:794px;min-height:1123px;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;background:#ffffff;color:#1e293b;padding:32px;font-size:12px;margin:0;">
+<body style="width:794px;min-height:1123px;overflow:hidden;font-family:'Noto Sans KR','Malgun Gothic','Noto Color Emoji',sans-serif;background:#ffffff;color:#1e293b;padding:32px;font-size:12px;margin:0;box-sizing:border-box;">
 
-<div style="border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:baseline;">
-  <h1 style="font-size:18px;font-weight:700;color:#0f172a;margin:0;">${reportWeekLabel(weekStart)}</h1>
-  <span style="font-size:10px;color:#94a3b8;">${generatedAt}</span>
+<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:16px;overflow:hidden;">
+  <h1 style="font-size:18px;font-weight:700;color:#0f172a;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">${reportWeekLabel(weekStart)}</h1>
+  <span style="font-size:10px;color:#94a3b8;white-space:nowrap;margin-left:12px;flex-shrink:0;">${generatedAt}</span>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
@@ -1570,7 +1570,17 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
 </div>
 
 <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">훈련 목록</div>
-<table style="width:100%;border-collapse:collapse;font-size:12px;">
+<table style="width:730px;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+  <colgroup>
+    <col style="width:68px">
+    <col style="width:68px">
+    <col style="width:auto">
+    <col style="width:58px">
+    <col style="width:56px">
+    <col style="width:52px">
+    <col style="width:70px">
+    <col style="width:82px">
+  </colgroup>
   <thead>
     <tr>
       <th ${thStyle()}>날짜</th>
