@@ -35,6 +35,14 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   console.log('Supabase not configured - using session storage (not persistent)');
 }
 
+let puppeteer = null;
+try {
+  puppeteer = require('puppeteer');
+  console.log('[Report] Puppeteer loaded');
+} catch (e) {
+  console.log('[Report] Puppeteer not available - report generation disabled');
+}
+
 // ===== stravaFetch: Rate-limit-aware Strava v3 API wrapper =====
 
 const rateLimitState = { usage15min: null, usageDaily: null, limit15min: null, limitDaily: null };
@@ -1426,6 +1434,220 @@ function formatPaceFromSeconds(seconds) {
   const sec = Math.round(seconds % 60);
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
+
+// ===== 주간 리포트 생성 (Puppeteer) =====
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function reportWeekLabel(weekStart) {
+  const mon = new Date(weekStart + 'T00:00:00');
+  const sun = new Date(mon);
+  sun.setDate(sun.getDate() + 6);
+  const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`;
+  return `주간 훈련 리포트 · ${mon.getFullYear()}년 ${mon.getMonth() + 1}월 (${fmt(mon)}~${fmt(sun)})`;
+}
+
+function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
+  const RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
+  const workouts = (rawWorkouts || [])
+    .filter(w => w.type !== 'warmup-cooldown')
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const subTSessions = workouts.filter(w => w.type === 'sub-t');
+  const totalDist = workouts.reduce((s, w) => s + parseFloat(w.distance || 0), 0);
+  const totalTime = workouts.reduce((s, w) => s + (w.duration || 0), 0);
+  const qualityTime = subTSessions.reduce((s, w) => s + (w.duration || 0) * 0.6, 0);
+  const qualityPct = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+
+  const weekStartDate = new Date(weekStart + 'T00:00:00');
+  const dayMap = {};
+  workouts.forEach(w => {
+    const diff = Math.round((new Date(w.date + 'T00:00:00') - weekStartDate) / 86400000);
+    if (diff >= 0 && diff < 7) {
+      if (!dayMap[diff]) dayMap[diff] = [];
+      dayMap[diff].push(w);
+    }
+  });
+
+  const typeIcon = t => ({ 'sub-t': '🔥', 'easy': '🚶', 'long': '🏃' }[t] || (RACE_TYPES.includes(t) ? '🏅' : '▶'));
+  const typeName = t => ({ 'sub-t': 'Sub-T', 'easy': '이지런', 'long': '롱런', 'race-hm': '대회(HM)', 'race-fm': '대회(FM)', 'race-5k': '대회(5K)', 'race-10k': '대회(10K)' }[t] || escapeHtml(t));
+  const typeBg = t => ({ 'sub-t': '#fef3c7', 'easy': '#dcfce7', 'long': '#ede9fe' }[t] || (RACE_TYPES.includes(t) ? '#dbeafe' : '#f1f5f9'));
+  const typeColor = t => ({ 'sub-t': '#d97706', 'easy': '#16a34a', 'long': '#7c3aed' }[t] || (RACE_TYPES.includes(t) ? '#1d4ed8' : '#64748b'));
+  const dayBg = t => ({ 'sub-t': '#fff7ed', 'easy': '#f0fdf4', 'long': '#faf5ff' }[t] || (RACE_TYPES.includes(t) ? '#eff6ff' : '#f8fafc'));
+
+  const fmtDist = d => parseFloat(d || 0).toFixed(1);
+  const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+  const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
+  const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
+  const now = new Date();
+  const generatedAt = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')} 생성`;
+
+  const dayGridHTML = Array.from({ length: 7 }, (_, i) => {
+    const dayWorkouts = dayMap[i] || [];
+    const mainW = dayWorkouts.find(w => w.type === 'sub-t') ||
+                  dayWorkouts.find(w => RACE_TYPES.includes(w.type)) ||
+                  dayWorkouts.find(w => w.type === 'long') ||
+                  dayWorkouts.find(w => w.type === 'easy') ||
+                  dayWorkouts[0];
+    const bg = mainW ? dayBg(mainW.type) : '#f8fafc';
+    const border = mainW ? `1px solid ${typeBg(mainW.type)}` : '1px solid #e2e8f0';
+    return `<div style="background:${bg};border:${border};border-radius:8px;padding:8px 4px;text-align:center;">
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">${DAY_NAMES[i]}</div>
+      <div style="font-size:18px;line-height:1.2;">${mainW ? typeIcon(mainW.type) : '–'}</div>
+      <div style="font-size:10px;color:#64748b;margin-top:3px;">${mainW ? typeName(mainW.type) : '휴식'}</div>
+      ${mainW ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px;">${fmtDist(mainW.distance)}km</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const tableRowsHTML = workouts.map((w, i) => {
+    const dateObj = new Date(w.date + 'T00:00:00');
+    const dateStr = `${dateObj.getMonth() + 1}/${dateObj.getDate()}(${DAY_KO[dateObj.getDay()]})`;
+    const pace = escapeHtml(w.correctedPace || w.avgPace || '–');
+    const hr = w.avgHR ? `${w.avgHR}bpm` : '–';
+    const intervalPace = w.type === 'sub-t' ? escapeHtml(w.intervalPace || '–') : '';
+    const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+    const td = (content, align = 'left', extra = '') =>
+      `<td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:${align};white-space:nowrap;vertical-align:middle;${extra}">${content}</td>`;
+
+    return `<tr>
+      ${td(dateStr)}
+      ${td(`<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${typeBg(w.type)};color:${typeColor(w.type)};">${typeName(w.type)}</span>`)}
+      ${td(`<span style="color:#475569;font-size:11px;">${escapeHtml(w.name || '')}</span>`, 'left', 'max-width:155px;overflow:hidden;text-overflow:ellipsis;')}
+      ${td(`${fmtDist(w.distance)}km`, 'right')}
+      ${td(fmtMin(w.duration), 'right')}
+      ${td(pace, 'right')}
+      ${td(hr, 'right')}
+      ${td(intervalPace ? `<span style="color:${intervalPace !== '–' ? '#d97706' : '#94a3b8'};">${intervalPace}</span>` : '', 'right')}
+    </tr>`;
+  }).join('');
+
+  const thStyle = (align = 'left') =>
+    `style="background:#f1f5f9;color:#64748b;font-weight:600;font-size:11px;padding:8px;text-align:${align};border-bottom:1px solid #e2e8f0;"`;
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body style="width:794px;min-height:1123px;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;background:#ffffff;color:#1e293b;padding:32px;font-size:12px;margin:0;">
+
+<div style="border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:baseline;">
+  <h1 style="font-size:18px;font-weight:700;color:#0f172a;margin:0;">${reportWeekLabel(weekStart)}</h1>
+  <span style="font-size:10px;color:#94a3b8;">${generatedAt}</span>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:22px;font-weight:700;color:#3b82f6;line-height:1;margin-bottom:4px;">${fmtDist(totalDist)}<span style="font-size:13px;font-weight:500;">km</span></div>
+    <div style="font-size:11px;color:#64748b;">총 거리</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:22px;font-weight:700;color:#0f172a;line-height:1;margin-bottom:4px;">${fmtMin(totalTime)}</div>
+    <div style="font-size:11px;color:#64748b;">총 훈련 시간</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:22px;font-weight:700;color:#d97706;line-height:1;margin-bottom:4px;">${subTSessions.length}</div>
+    <div style="font-size:11px;color:#64748b;">Sub-T 세션</div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;">
+    <div style="font-size:22px;font-weight:700;color:${qualityPct >= 18 && qualityPct <= 27 ? '#16a34a' : '#d97706'};line-height:1;margin-bottom:4px;">${qualityPct}<span style="font-size:14px;font-weight:500;">%</span></div>
+    <div style="font-size:11px;color:#64748b;">퀄리티 볼륨</div>
+  </div>
+</div>
+
+<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">훈련 구조</div>
+<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:16px;">
+  ${dayGridHTML}
+</div>
+
+<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">훈련 목록</div>
+<table style="width:100%;border-collapse:collapse;font-size:12px;">
+  <thead>
+    <tr>
+      <th ${thStyle()}>날짜</th>
+      <th ${thStyle()}>타입</th>
+      <th ${thStyle()}>운동명</th>
+      <th ${thStyle('right')}>거리</th>
+      <th ${thStyle('right')}>시간</th>
+      <th ${thStyle('right')}>페이스</th>
+      <th ${thStyle('right')}>평균HR</th>
+      <th ${thStyle('right')}>인터벌 페이스</th>
+    </tr>
+  </thead>
+  <tbody>${tableRowsHTML}</tbody>
+</table>
+
+<div style="margin-top:16px;padding-top:10px;border-top:1px solid #f1f5f9;display:flex;justify-content:space-between;font-size:10px;color:#cbd5e1;">
+  <span>Norwegian Singles Method Training App</span>
+  <span>Powered by Strava</span>
+</div>
+
+</body>
+</html>`;
+}
+
+app.post('/api/report/weekly', async (req, res) => {
+  if (!req.session.strava?.athlete) {
+    return res.status(401).json({ error: '로그인이 필요합니다.' });
+  }
+  if (!puppeteer) {
+    return res.status(503).json({ error: 'PDF/PNG 생성 기능을 사용할 수 없습니다.' });
+  }
+
+  const { weekStart, format, workouts, userMaxHR } = req.body;
+  if (!workouts || !weekStart || !['png', 'pdf'].includes(format)) {
+    return res.status(400).json({ error: '필수 파라미터 누락 또는 잘못된 형식' });
+  }
+
+  const html = generateReportHTML({ weekStart, workouts, userMaxHR: userMaxHR || 190 });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+        '--no-first-run',
+        '--disable-extensions'
+      ]
+    });
+    const page = await browser.newPage();
+    if (format === 'png') {
+      await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
+    }
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+
+    const filename = `weekly-report-${weekStart}`;
+    if (format === 'pdf') {
+      const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+      res.send(pdf);
+    } else {
+      const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 794, height: 1123 } });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.png"`);
+      res.send(png);
+    }
+  } catch (err) {
+    console.error('[Report] 생성 오류:', err);
+    res.status(500).json({ error: '리포트 생성 중 오류가 발생했습니다: ' + err.message });
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+});
 
 // ===== 기본 라우트 =====
 

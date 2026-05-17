@@ -4001,6 +4001,10 @@
               다음 주 →
             </button>
           </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(71,85,105,0.2);">
+            <button id="report-dl-png" onclick="downloadWeeklyReport('png')" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px;">↓ PNG</button>
+            <button id="report-dl-pdf" onclick="downloadWeeklyReport('pdf')" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px;">↓ PDF</button>
+          </div>
         </div>
 
         <!-- 주간 요약 통계 -->
@@ -4255,6 +4259,42 @@
           ${feedbacks.length === 0 ? `<div style="text-align:center; padding:30px; color:#64748b;">이번 주 훈련 기록이 없습니다.</div>` : ''}
         </div>
       `;
+    }
+
+    async function downloadWeeklyReport(format) {
+      const weekWorkouts = getWorkoutsForWeek(selectedReportWeekKey);
+      if (!weekWorkouts || weekWorkouts.length === 0) {
+        alert('이번 주 훈련 데이터가 없습니다.');
+        return;
+      }
+      const btn = document.getElementById(`report-dl-${format}`);
+      const originalText = btn ? btn.textContent : '';
+      if (btn) { btn.textContent = '생성 중...'; btn.disabled = true; }
+      try {
+        const response = await fetch(`${API_BASE}/api/report/weekly`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ weekStart: selectedReportWeekKey, format, workouts: weekWorkouts, userMaxHR })
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || '생성 실패');
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `weekly-report-${selectedReportWeekKey}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(`리포트 생성 실패: ${err.message}`);
+      } finally {
+        if (btn) { btn.textContent = originalText; btn.disabled = false; }
+      }
     }
 
     function navigateReportWeek(direction) {
