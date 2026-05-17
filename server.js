@@ -1454,17 +1454,67 @@ function reportWeekLabel(weekStart) {
   return `주간 훈련 리포트 · ${mon.getFullYear()}년 ${mon.getMonth() + 1}월 (${fmt(mon)}~${fmt(sun)})`;
 }
 
-function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
+function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR, userRestingHR }) {
   const RACE_TYPES = ['race-hm', 'race-fm', 'race-5k', 'race-10k'];
   const workouts = (rawWorkouts || [])
     .filter(w => w.type !== 'warmup-cooldown')
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
+  const maxHR = userMaxHR || 190;
+  const restHR = userRestingHR || 60;
+
   const subTSessions = workouts.filter(w => w.type === 'sub-t');
+  const easySessions = workouts.filter(w => w.type === 'easy');
+  const longSessions = workouts.filter(w => w.type === 'long');
   const totalDist = workouts.reduce((s, w) => s + parseFloat(w.distance || 0), 0);
   const totalTime = workouts.reduce((s, w) => s + (w.duration || 0), 0);
   const qualityTime = subTSessions.reduce((s, w) => s + (w.duration || 0) * 0.6, 0);
   const qualityPct = totalTime > 0 ? Math.round((qualityTime / totalTime) * 100) : 0;
+
+  // HR 존 (Karvonen)
+  const subTLowHR = Math.round(restHR + (maxHR - restHR) * 0.82);
+  const subTHighHR = Math.round(restHR + (maxHR - restHR) * 0.88);
+  const easyMaxHR = Math.round(maxHR * 0.70);
+
+  // 훈련 효과 평가
+  const evalSubT = w => {
+    const hr = w.intervalHR || w.avgHR;
+    if (!hr) return { badge: 'info', text: 'HR 데이터 없음' };
+    const label = w.intervalHR ? '인터벌 HR' : '전체 평균 HR';
+    if (hr >= subTLowHR && hr <= subTHighHR) return { badge: 'good', text: `목표 HR 범위 (${hr}bpm, ${label})` };
+    if (hr < subTLowHR) return { badge: 'warn', text: `HR 낮음 — ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR} (${label})` };
+    return { badge: 'danger', text: `HR 높음 — ${hr}bpm / 목표 ${subTLowHR}~${subTHighHR} (${label})` };
+  };
+  const evalEasy = w => {
+    if (!w.avgHR) return { badge: 'info', text: 'HR 데이터 없음' };
+    if (w.avgHR <= easyMaxHR) return { badge: 'good', text: `HR 준수 (${w.avgHR}bpm ≤ ${easyMaxHR}bpm)` };
+    return { badge: 'warn', text: `HR 초과 — ${w.avgHR}bpm (목표 ≤ ${easyMaxHR}bpm)` };
+  };
+  const evalLong = w => {
+    if (w.duration >= 90) return { badge: 'good', text: `${w.duration}분 — 충분한 롱런` };
+    if (w.duration >= 70) return { badge: 'warn', text: `${w.duration}분 — 85분 이상 권장` };
+    return { badge: 'danger', text: `${w.duration}분 — 롱런으로 보기 짧음` };
+  };
+
+  const badgeBg = { good: '#dcfce7', warn: '#fef9c3', danger: '#fee2e2', info: '#f1f5f9' };
+  const badgeColor = { good: '#16a34a', warn: '#854d0e', danger: '#b91c1c', info: '#64748b' };
+
+  // 주간총평 피드백
+  const feedbacks = [];
+  const easyTooHard = easySessions.filter(w => w.avgHR && w.avgHR > easyMaxHR).length;
+  if (subTSessions.length === 0) feedbacks.push({ badge: 'danger', title: 'Sub-T 세션 없음', text: '이번 주 Sub-T 훈련이 없었습니다. 2-3회를 포함해보세요.' });
+  else if (subTSessions.length >= 2) feedbacks.push({ badge: 'good', title: `Sub-T ${subTSessions.length}회 완료`, text: '권장 횟수(2-3회)를 충족했습니다.' });
+  else feedbacks.push({ badge: 'warn', title: `Sub-T ${subTSessions.length}회`, text: '2-3회를 목표로 해보세요.' });
+
+  if (easyTooHard > 0) feedbacks.push({ badge: 'danger', title: `이지런 HR 초과 ${easyTooHard}회`, text: `이지런 ${easyTooHard}회에서 ${easyMaxHR}bpm을 초과했습니다.` });
+  else if (easySessions.length > 0) feedbacks.push({ badge: 'good', title: '이지런 HR 준수', text: '모든 이지런에서 HR을 제대로 유지했습니다.' });
+
+  if (longSessions.length === 0 && workouts.length >= 3) feedbacks.push({ badge: 'warn', title: '롱런 없음', text: '주 1회 85분 이상 롱런을 권장합니다.' });
+  else if (longSessions.length > 0) feedbacks.push({ badge: 'good', title: '롱런 완료', text: `${longSessions.length}회 롱런을 포함했습니다.` });
+
+  if (qualityPct > 30) feedbacks.push({ badge: 'danger', title: `퀄리티 볼륨 과다 (${qualityPct}%)`, text: '30% 초과. Easy 비중을 늘려주세요.' });
+  else if (qualityPct >= 18 && qualityPct <= 27) feedbacks.push({ badge: 'good', title: `퀄리티 볼륨 적정 (${qualityPct}%)`, text: '20-25% 목표 범위에 맞습니다.' });
+  else if (qualityPct > 0) feedbacks.push({ badge: 'warn', title: `퀄리티 볼륨 낮음 (${qualityPct}%)`, text: '20-25%를 목표로 Sub-T 볼륨을 조정해보세요.' });
 
   const weekStartDate = new Date(weekStart + 'T00:00:00');
   const dayMap = {};
@@ -1596,6 +1646,48 @@ function generateReportHTML({ weekStart, workouts: rawWorkouts, userMaxHR }) {
   <tbody>${tableRowsHTML}</tbody>
 </table>
 
+<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:16px;margin-bottom:8px;">훈련 효과 분석</div>
+<table style="width:730px;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+  <colgroup><col style="width:68px"><col style="width:68px"><col style="width:auto"><col style="width:200px"></colgroup>
+  <thead>
+    <tr>
+      <th ${thStyle()}>날짜</th>
+      <th ${thStyle()}>타입</th>
+      <th ${thStyle()}>운동명</th>
+      <th ${thStyle()}>평가</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${workouts.filter(w => ['sub-t','easy','long'].includes(w.type) || RACE_TYPES.includes(w.type)).map((w, i) => {
+      let ev = null;
+      if (w.type === 'sub-t') ev = evalSubT(w);
+      else if (w.type === 'easy') ev = evalEasy(w);
+      else if (w.type === 'long') ev = evalLong(w);
+      else if (RACE_TYPES.includes(w.type)) ev = { badge: 'info', text: '대회 / TT 기록' };
+      const dateObj = new Date(w.date + 'T00:00:00');
+      const DAY_KO2 = ['일','월','화','수','목','금','토'];
+      const dateStr = `${dateObj.getMonth()+1}/${dateObj.getDate()}(${DAY_KO2[dateObj.getDay()]})`;
+      const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+      const evBadge = ev ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:${badgeBg[ev.badge]};color:${badgeColor[ev.badge]};">${escapeHtml(ev.text)}</span>` : '';
+      return `<tr>
+        <td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;overflow:hidden;white-space:nowrap;">${dateStr}</td>
+        <td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${typeBg(w.type)};color:${typeColor(w.type)};">${typeName(w.type)}</span></td>
+        <td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#475569;font-size:11px;">${escapeHtml(w.name||'')}</td>
+        <td style="background:${bg};padding:7px 8px;border-bottom:1px solid #f1f5f9;overflow:hidden;">${evBadge}</td>
+      </tr>`;
+    }).join('')}
+  </tbody>
+</table>
+
+<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:16px;margin-bottom:8px;">주간 총평</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+  ${feedbacks.map(f => `
+    <div style="padding:10px 12px;border-radius:8px;background:${badgeBg[f.badge]};border-left:3px solid ${badgeColor[f.badge]};">
+      <div style="font-size:12px;font-weight:700;color:${badgeColor[f.badge]};margin-bottom:2px;">${escapeHtml(f.title)}</div>
+      <div style="font-size:11px;color:#475569;">${escapeHtml(f.text)}</div>
+    </div>`).join('')}
+</div>
+
 <div style="margin-top:16px;padding-top:10px;border-top:1px solid #f1f5f9;display:flex;justify-content:space-between;font-size:10px;color:#cbd5e1;">
   <span>Norwegian Singles Method Training App</span>
   <span>Powered by Strava</span>
@@ -1613,12 +1705,12 @@ app.post('/api/report/weekly', async (req, res) => {
     return res.status(503).json({ error: 'PDF/PNG 생성 기능을 사용할 수 없습니다.' });
   }
 
-  const { weekStart, format, workouts, userMaxHR } = req.body;
+  const { weekStart, format, workouts, userMaxHR, userRestingHR } = req.body;
   if (!workouts || !weekStart || !['png', 'pdf'].includes(format)) {
     return res.status(400).json({ error: '필수 파라미터 누락 또는 잘못된 형식' });
   }
 
-  const html = generateReportHTML({ weekStart, workouts, userMaxHR: userMaxHR || 190 });
+  const html = generateReportHTML({ weekStart, workouts, userMaxHR: userMaxHR || 190, userRestingHR: userRestingHR || 60 });
   let browser;
   try {
     browser = await puppeteer.launch({

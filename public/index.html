@@ -4275,7 +4275,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ weekStart: selectedReportWeekKey, format, workouts: weekWorkouts, userMaxHR })
+          body: JSON.stringify({ weekStart: selectedReportWeekKey, format, workouts: weekWorkouts, userMaxHR, userRestingHR })
         });
         if (!response.ok) {
           const err = await response.json().catch(() => ({}));
